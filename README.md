@@ -21,6 +21,17 @@ on the maintained [pydicom](https://pydicom.github.io/) /
 
 > `SmartHL7.Sender` is HL7, not DICOM, and is **not** part of this app (separate track if wanted).
 
+### Added beyond the legacy tools
+| Tab | What it does |
+|-----|--------------|
+| **Echo All (health)** | One click pings every saved destination; shows reachable/unreachable + latency. |
+| **Retrieve (C-Get)** | Query a source and pull studies to a local folder over a single association — no need to register your AE/port on the remote (firewall-friendly alternative to C-Move). |
+| **Storage Commit** | Ask an archive to confirm it safely stored specific objects (N-ACTION + N-EVENT-REPORT). |
+| **De-identify Files** | Run the Store Receiver's anonymize/morph/pixel-blank engine on local files/folders — great for research data prep. |
+| **Logs** | Live tail of the activity log with auto-refresh. |
+
+Send now shows a **progress bar + Cancel** for large transfers.
+
 ## Running
 
 - **Users:** double-click `dist/DICOMToolkit.exe`. No Python install required.

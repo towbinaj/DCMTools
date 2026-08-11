@@ -15,7 +15,7 @@ from typing import Callable, Iterable
 from pydicom import dcmread
 from pydicom.dataset import Dataset
 from pydicom.uid import generate_uid
-from pynetdicom import AE, evt
+from pynetdicom import AE, evt, build_role
 from pynetdicom.presentation import (
     StoragePresentationContexts,
     VerificationPresentationContexts,
@@ -24,8 +24,11 @@ from pynetdicom.presentation import (
 from pynetdicom.sop_class import (
     PatientRootQueryRetrieveInformationModelFind,
     PatientRootQueryRetrieveInformationModelMove,
+    PatientRootQueryRetrieveInformationModelGet,
     StudyRootQueryRetrieveInformationModelFind,
     StudyRootQueryRetrieveInformationModelMove,
+    StudyRootQueryRetrieveInformationModelGet,
+    StorageCommitmentPushModel,
 )
 
 from ..logging_setup import get_logger
@@ -121,7 +124,9 @@ def _contexts_for_files(files: list[Path]) -> list:
 
 
 def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
-            progress: Progress = _noop) -> StoreResult:
+            progress: Progress = _noop,
+            should_cancel: Callable[[], bool] | None = None,
+            on_frac: Callable[[float], None] | None = None) -> StoreResult:
     files = [Path(f) for f in files]
     result = StoreResult()
     if not files:
@@ -147,11 +152,16 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
 
     try:
         for i, f in enumerate(files, 1):
+            if should_cancel is not None and should_cancel():
+                progress(f"Cancelled after {i - 1} file(s).")
+                break
             try:
                 ds = dcmread(str(f), force=True)
             except Exception as exc:  # noqa: BLE001
                 result.failed += 1
                 result.errors.append(f"{f.name}: unreadable ({exc})")
+                if on_frac:
+                    on_frac(i / len(files))
                 continue
             status = assoc.send_c_store(ds)
             if status and status.Status == 0x0000:
@@ -167,6 +177,8 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
                 code = f"0x{status.Status:04x}" if status else "no response"
                 result.errors.append(f"{f.name}: C-STORE status {code}")
                 progress(f"[{i}/{len(files)}] FAILED {f.name} ({code})")
+            if on_frac:
+                on_frac(i / len(files))
     finally:
         assoc.release()
 
@@ -265,4 +277,173 @@ def c_move(my_aetitle: str, node: Node, dest_aetitle: str,
                           f"{result.failed}, warnings {result.warning}.")
     finally:
         assoc.release()
+    return result
+
+
+# ---------------------------------------------------------------------------
+# C-GET (retrieve over the same association)
+# ---------------------------------------------------------------------------
+_GET_MODELS = {
+    "PATIENT": PatientRootQueryRetrieveInformationModelGet,
+    "STUDY": StudyRootQueryRetrieveInformationModelGet,
+}
+
+
+@dataclass
+class GetResult:
+    completed: int = 0
+    failed: int = 0
+    warning: int = 0
+    saved: int = 0
+    message: str = ""
+
+
+def c_get(my_aetitle: str, node: Node, identifier: Dataset, out_dir: Path,
+          model: str = "STUDY", timeout: int = 300,
+          progress: Progress = _noop) -> GetResult:
+    """Retrieve objects with C-GET, saving them locally over one association.
+
+    Unlike C-MOVE, C-GET streams the objects back on the same connection, so no
+    separate destination AE needs to be registered on the remote node.
+    """
+    result = GetResult()
+    get_model = _GET_MODELS[model.upper()]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    saved = {"n": 0}
+
+    def handle_store(event):
+        ds = event.dataset
+        ds.file_meta = event.file_meta
+        uid = getattr(ds, "SOPInstanceUID", None) or generate_uid()
+        (out_dir / f"{uid}.dcm").parent.mkdir(parents=True, exist_ok=True)
+        ds.save_as(str(out_dir / f"{uid}.dcm"), enforce_file_format=True)
+        saved["n"] += 1
+        return 0x0000
+
+    ae = AE(ae_title=my_aetitle)
+    ae.add_requested_context(get_model)
+    # Propose storage contexts with the SCP role so the remote can send objects
+    # back to us. Cap to stay within the 128-context association limit.
+    roles = []
+    for cx in StoragePresentationContexts[:115]:
+        ae.add_requested_context(cx.abstract_syntax)
+        roles.append(build_role(cx.abstract_syntax, scp_role=True))
+    ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
+
+    progress(f"Associating with {node.aetitle}@{node.host}:{node.port} ...")
+    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
+                         ext_neg=roles,
+                         evt_handlers=[(evt.EVT_C_STORE, handle_store)])
+    if not assoc.is_established:
+        result.message = "Association rejected / aborted / failed."
+        return result
+    try:
+        for status, _ds in assoc.send_c_get(identifier, get_model):
+            if not status:
+                continue
+            if "NumberOfCompletedSuboperations" in status:
+                result.completed = status.NumberOfCompletedSuboperations or 0
+            if "NumberOfFailedSuboperations" in status:
+                result.failed = status.NumberOfFailedSuboperations or 0
+            if "NumberOfWarningSuboperations" in status:
+                result.warning = status.NumberOfWarningSuboperations or 0
+            progress(f"Retrieved {saved['n']} object(s) so far...")
+        result.saved = saved["n"]
+        result.message = (f"Saved {result.saved} object(s) "
+                          f"(completed {result.completed}, "
+                          f"failed {result.failed}).")
+    finally:
+        assoc.release()
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Storage Commitment (N-ACTION request + N-EVENT-REPORT result)
+# ---------------------------------------------------------------------------
+@dataclass
+class CommitResult:
+    requested: int = 0
+    committed: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
+    report_received: bool = False
+    message: str = ""
+
+
+def storage_commit(my_aetitle: str, node: Node, sop_refs: list[tuple[str, str]],
+                   listen_port: int = 11115, timeout: int = 60,
+                   progress: Progress = _noop) -> CommitResult:
+    """Request storage commitment for the given (SOPClassUID, SOPInstanceUID).
+
+    Opens a temporary local SCP to receive the asynchronous N-EVENT-REPORT the
+    archive sends back, then issues the N-ACTION request. Waits up to ``timeout``
+    seconds for the report.
+
+    NOTE: the remote archive must be able to reach ``my_aetitle`` at
+    ``listen_port`` for the result report to arrive.
+    """
+    import threading
+
+    result = CommitResult(requested=len(sop_refs))
+    txn_uid = generate_uid()
+    done_evt = threading.Event()
+
+    def handle_report(event):
+        ds = event.event_information
+        for item in getattr(ds, "ReferencedSOPSequence", []) or []:
+            result.committed.append(str(item.ReferencedSOPInstanceUID))
+        for item in getattr(ds, "FailedSOPSequence", []) or []:
+            result.failed.append(str(item.ReferencedSOPInstanceUID))
+        result.report_received = True
+        done_evt.set()
+        return 0x0000
+
+    # Local SCP to catch the report.
+    scp_ae = AE(ae_title=my_aetitle)
+    scp_ae.add_supported_context(StorageCommitmentPushModel)
+    server = scp_ae.start_server(
+        ("0.0.0.0", listen_port), block=False,
+        evt_handlers=[(evt.EVT_N_EVENT_REPORT, handle_report)])
+
+    try:
+        # Build the N-ACTION request dataset.
+        req = Dataset()
+        req.TransactionUID = txn_uid
+        req.ReferencedSOPSequence = []
+        for sop_class, sop_inst in sop_refs:
+            item = Dataset()
+            item.ReferencedSOPClassUID = sop_class
+            item.ReferencedSOPInstanceUID = sop_inst
+            req.ReferencedSOPSequence.append(item)
+
+        ae = AE(ae_title=my_aetitle)
+        ae.add_requested_context(StorageCommitmentPushModel)
+        ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
+        progress(f"Requesting commitment for {len(sop_refs)} instance(s)...")
+        assoc = ae.associate(node.host, node.port, ae_title=node.aetitle)
+        if not assoc.is_established:
+            result.message = "Association rejected / aborted / failed."
+            return result
+        try:
+            status, _reply = assoc.send_n_action(
+                req, 1, StorageCommitmentPushModel,
+                "1.2.840.10008.1.20.1.1")  # well-known SOP instance
+        finally:
+            assoc.release()
+
+        if not status or status.Status != 0x0000:
+            code = f"0x{status.Status:04x}" if status else "no response"
+            result.message = f"N-ACTION failed ({code})."
+            return result
+
+        progress("N-ACTION accepted; waiting for result report...")
+        if done_evt.wait(timeout):
+            result.message = (f"Committed {len(result.committed)}, "
+                              f"failed {len(result.failed)}.")
+        else:
+            result.message = ("No result report received within "
+                              f"{timeout}s (archive may report later, or "
+                              "cannot reach this AE/port).")
+    finally:
+        server.shutdown()
     return result

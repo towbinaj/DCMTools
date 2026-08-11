@@ -249,3 +249,59 @@ def write_dump_csv(result: DumpResult, out_csv: Path,
         writer = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(result.rows)
+
+
+# ---------------------------------------------------------------------------
+# De-identify files (file-side use of the receiver's Processor engine)
+# ---------------------------------------------------------------------------
+@dataclass
+class DeidentResult:
+    written: int = 0
+    failed: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
+                     base_dir: Path | None = None,
+                     progress: Progress = _noop) -> DeidentResult:
+    """Apply the anonymize/morph/pixel-blank Processor to files, saving copies.
+
+    ``cfg`` is a ``store.processing.ReceiverConfig``. Output structure mirrors
+    the input relative to ``base_dir`` when given, else files land flat in
+    ``out_dir`` (name collisions get a numeric suffix).
+    """
+    from ..store.processing import Processor  # lazy: avoids import cycle
+
+    files = [Path(f) for f in files]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    proc = Processor(cfg)
+    result = DeidentResult()
+    used: set[Path] = set()
+
+    for i, f in enumerate(files, 1):
+        try:
+            ds = dcmread(str(f), force=True)
+            proc.process(ds)
+            if base_dir is not None:
+                try:
+                    rel = f.relative_to(base_dir)
+                except ValueError:
+                    rel = Path(f.name)
+                dest = out_dir / rel
+            else:
+                dest = out_dir / f.name
+            # avoid clobbering / collisions
+            while dest in used or dest.resolve() == f.resolve():
+                dest = dest.with_stem(dest.stem + "_1")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            ds.save_as(str(dest), enforce_file_format=True)
+            used.add(dest)
+            result.written += 1
+            progress(f"[{i}/{len(files)}] {f.name} -> {dest.name}")
+        except Exception as exc:  # noqa: BLE001
+            result.failed += 1
+            result.errors.append(f"{f.name}: {exc}")
+            progress(f"[{i}/{len(files)}] FAILED {f.name}: {exc}")
+    progress(f"Done. Wrote {result.written}, failed {result.failed}.")
+    return result

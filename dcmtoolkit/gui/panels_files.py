@@ -8,8 +8,13 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from ..tools import fileops
+from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .widgets import run_threaded, PAD
+
+
+def _split(text: str) -> list[str]:
+    return [p.strip() for p in text.split("|") if p.strip()]
 
 
 class TagListPanel(ToolPanel):
@@ -279,3 +284,157 @@ class DumpPanel(ToolPanel):
             self.btn.configure(state="normal")
 
         run_threaded(self, work, done, err)
+
+
+class DeidentifyPanel(ToolPanel):
+    title = "De-identify Files"
+    description = ("Anonymize / morph / pixel-blank local DICOM files to an "
+                  "output folder (same engine as the Store Receiver).")
+
+    def build(self) -> None:
+        self.files: list[Path] = []
+        self.base_dir: Path | None = None
+        self.out_dir: Path | None = None
+
+        src = ctk.CTkFrame(self.body, fg_color="transparent")
+        src.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
+        ctk.CTkButton(src, text="Add Files...",
+                      command=self._add_files).pack(side="left")
+        ctk.CTkButton(src, text="Add Folder...",
+                      command=self._add_folder).pack(side="left", padx=PAD)
+        ctk.CTkButton(src, text="Output folder...",
+                      command=self._pick_out).pack(side="left")
+        self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color="gray")
+        self.count_lbl.pack(side="left", padx=PAD)
+
+        form = ctk.CTkScrollableFrame(self.body, height=210)
+        form.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
+        form.grid_columnconfigure(1, weight=1)
+        self.body.grid_columnconfigure(0, weight=1)
+        r = 0
+
+        def row(label, widget):
+            nonlocal r
+            ctk.CTkLabel(form, text=label, anchor="w", width=170).grid(
+                row=r, column=0, sticky="w", padx=PAD, pady=3)
+            widget.grid(row=r, column=1, sticky="ew", padx=PAD, pady=3)
+            r += 1
+            return widget
+
+        def entry(width=280):
+            return ctk.CTkEntry(form, width=width)
+
+        self.rm_private = ctk.CTkCheckBox(form, text="Remove private tags")
+        self.rm_private.select()
+        row("", self.rm_private)
+        self.rm_groups = row("Remove Groups (gggg|..)", entry())
+        self.rm_tags = row("Remove Tags (ggggeeee|..)", entry())
+        self.anon_tags = ctk.CTkCheckBox(form, text="Anonymize tags via file")
+        row("", self.anon_tags)
+        anonbar = ctk.CTkFrame(form, fg_color="transparent")
+        self.anon_file = ctk.CTkEntry(anonbar, width=360)
+        self.anon_file.pack(side="left")
+        ctk.CTkButton(anonbar, text="...", width=32,
+                      command=lambda: self._browse_into(self.anon_file)).pack(
+            side="left", padx=4)
+        row("Anonymize File", anonbar)
+        self.calc_dates = ctk.CTkCheckBox(form, text="Calculated dates")
+        row("", self.calc_dates)
+        self.img_top = row("Remove Image Top %", entry(80))
+        self.img_top_mod = row("  ...top modalities", entry())
+        self.img_left = row("Remove Image Left %", entry(80))
+        self.img_left_mod = row("  ...left modalities", entry())
+        self.morph_tags = ctk.CTkCheckBox(form, text="Enable morphing")
+        row("", self.morph_tags)
+        self.morph_fmt = row("Morph Format (tags|..)", entry())
+        morphbar = ctk.CTkFrame(form, fg_color="transparent")
+        self.morph_file = ctk.CTkEntry(morphbar, width=360)
+        self.morph_file.pack(side="left")
+        ctk.CTkButton(morphbar, text="...", width=32,
+                      command=lambda: self._browse_into(self.morph_file)).pack(
+            side="left", padx=4)
+        row("Morph File", morphbar)
+
+        self.btn = ctk.CTkButton(self.body, text="De-identify",
+                                 command=self._run)
+        self.btn.grid(row=2, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+
+    def _add_files(self):
+        paths = filedialog.askopenfilenames(
+            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
+        self.files.extend(Path(p) for p in paths)
+        self._update_count()
+
+    def _add_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.base_dir = Path(folder)
+            self.files.extend(fileops.find_dicom_files(Path(folder)))
+        self._update_count()
+
+    def _pick_out(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.out_dir = Path(folder)
+            self.log.write(f"Output: {folder}")
+
+    def _browse_into(self, entry):
+        f = filedialog.askopenfilename(filetypes=[("Text", "*.txt"),
+                                                  ("All", "*.*")])
+        if f:
+            entry.delete(0, "end")
+            entry.insert(0, f)
+
+    def _update_count(self):
+        self.files = list(dict.fromkeys(self.files))
+        self.count_lbl.configure(text=f"{len(self.files)} file(s).")
+
+    def _cfg(self) -> ReceiverConfig:
+        def to_int(s, d=0):
+            try:
+                return int(str(s).strip())
+            except ValueError:
+                return d
+        return ReceiverConfig(
+            remove_private_tags=bool(self.rm_private.get()),
+            remove_groups=_split(self.rm_groups.get()),
+            remove_tags=_split(self.rm_tags.get()),
+            anonymize_tags=bool(self.anon_tags.get()),
+            anonymize_file=self.anon_file.get().strip(),
+            calculated_dates=bool(self.calc_dates.get()),
+            remove_image_top=to_int(self.img_top.get(), 0),
+            remove_image_top_modality=_split(self.img_top_mod.get()),
+            remove_image_left=to_int(self.img_left.get(), 0),
+            remove_image_left_modality=_split(self.img_left_mod.get()),
+            morph_tags=bool(self.morph_tags.get()),
+            morphing_file_format=self.morph_fmt.get().strip(),
+            morphing_file=self.morph_file.get().strip(),
+        )
+
+    def _run(self):
+        if not self.files:
+            self.log.write("No files selected.")
+            return
+        out = self.out_dir or (self.files[0].parent / "deidentified")
+        cfg = self._cfg()
+        files = list(self.files)
+        base = self.base_dir
+        self.btn.configure(state="disabled")
+        self.log.write(f"--- De-identifying {len(files)} file(s) -> {out} ---")
+
+        def work():
+            return fileops.deidentify_files(files, cfg, out, base_dir=base,
+                                            progress=self.progress)
+
+        def done(result):
+            self.log.write(f"[DONE] wrote={result.written} "
+                           f"failed={result.failed}")
+            for e in result.errors[:20]:
+                self.log.write(f"   {e}")
+            self.btn.configure(state="normal")
+
+        def err2(exc, tb):
+            self.log.write(f"[ERROR] {exc}")
+            self.btn.configure(state="normal")
+
+        run_threaded(self, work, done, err2)

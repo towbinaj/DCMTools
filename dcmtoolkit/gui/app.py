@@ -6,9 +6,12 @@ import customtkinter as ctk
 
 from .. import APP_NAME, __version__, config, paths
 from ..logging_setup import setup as setup_logging
-from .panels_network import EchoPanel, SendPanel, QueryMovePanel
-from .panels_files import TagListPanel, ModifyPanel, SplitPanel, DumpPanel
+from .panels_network import (EchoPanel, SendPanel, QueryMovePanel,
+                             EchoAllPanel, RetrievePanel, StorageCommitPanel)
+from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
+                           DeidentifyPanel)
 from .panels_settings import SettingsPanel
+from .panels_logs import LogPanel
 
 # Store receiver panel is optional (imports pywin32 lazily for service bits).
 try:
@@ -19,8 +22,10 @@ except Exception:  # noqa: BLE001
 
 
 NAV_GROUPS = [
-    ("Network", [EchoPanel, SendPanel, QueryMovePanel]),
-    ("Files", [TagListPanel, ModifyPanel, SplitPanel, DumpPanel]),
+    ("Network", [EchoPanel, EchoAllPanel, SendPanel, QueryMovePanel,
+                 RetrievePanel, StorageCommitPanel]),
+    ("Files", [TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
+               DeidentifyPanel]),
 ]
 
 
@@ -79,7 +84,8 @@ class App(ctk.CTk):
         receiver_group = []
         if _HAS_RECEIVER:
             receiver_group = [("Receiver", [ReceiverPanel])]
-        groups = groups + receiver_group + [("Config", [SettingsPanel])]
+        groups = groups + receiver_group + [("Config", [LogPanel,
+                                                        SettingsPanel])]
 
         for group_name, panel_classes in groups:
             ctk.CTkLabel(self.sidebar, text=group_name.upper(),
