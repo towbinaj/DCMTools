@@ -1,0 +1,4 @@
+name,aetitle,host,port
+Example PACS,EXAMPLE_PACS,192.0.2.10,104
+Example VNA,EXAMPLE_VNA,192.0.2.20,11112
+Example Workstation,EXAMPLE_WS,192.0.2.30,104

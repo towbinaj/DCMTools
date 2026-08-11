@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Secrets / site-specific config -- NEVER commit these.
+# They contain real AE titles, hostnames, IPs and ports.
+# ---------------------------------------------------------------------------
+DICOMToolkit-data/
+**/destinations.json
+**/settings.json
+**/receiver.json
+*.log
+
+# Legacy site CSVs (in case they are ever copied into the repo)
+DCMSend.csv
+DCMQueryMove.csv
+DCMDropMove.csv
+DCMDropMove.log
+
+# ---------------------------------------------------------------------------
+# Python / build artifacts
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+build/
+dist/
+*.manifest
+*.spec.bak
+
+# ---------------------------------------------------------------------------
+# Editor / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

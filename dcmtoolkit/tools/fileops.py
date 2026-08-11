@@ -1,0 +1,251 @@
+"""File-based DICOM tools: tag listing, header modify, multiframe split, dump.
+
+These replace the legacy DCMTagLister, DCMModify, DCMSplitMF, DCMFolderDumper
+and DumpExamData executables. All are pure-pydicom and need no network.
+"""
+
+from __future__ import annotations
+
+import csv
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Iterable
+
+from pydicom import dcmread
+from pydicom.dataset import Dataset
+from pydicom.tag import Tag
+from pydicom.uid import generate_uid
+
+from ..logging_setup import get_logger
+
+log = get_logger("fileops")
+Progress = Callable[[str], None]
+
+
+def _noop(_: str) -> None:
+    pass
+
+
+_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def sanitize(part: str) -> str:
+    """Replace filesystem-illegal characters with underscore (legacy behavior)."""
+    return _ILLEGAL.sub("_", str(part)).strip() or "UNKNOWN"
+
+
+def find_dicom_files(root: Path, recursive: bool = True) -> list[Path]:
+    """Return DICOM-looking files under root (by extension or DICM magic)."""
+    root = Path(root)
+    if root.is_file():
+        return [root]
+    it = root.rglob("*") if recursive else root.glob("*")
+    files: list[Path] = []
+    for p in it:
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in (".dcm", ".dic", ".ima", ""):
+            files.append(p)
+    return files
+
+
+# ---------------------------------------------------------------------------
+# Tag listing (DCMTagLister)
+# ---------------------------------------------------------------------------
+@dataclass
+class TagRow:
+    tag: str
+    keyword: str
+    vr: str
+    value: str
+
+
+def list_tags(path: Path, max_value_len: int = 120) -> list[TagRow]:
+    ds = dcmread(str(path), force=True, stop_before_pixels=True)
+    rows: list[TagRow] = []
+
+    def walk(dataset: Dataset, prefix: str = "") -> None:
+        for elem in dataset:
+            tag_str = f"{prefix}({elem.tag.group:04X},{elem.tag.element:04X})"
+            if elem.VR == "SQ":
+                rows.append(TagRow(tag_str, elem.keyword or "", "SQ",
+                                   f"<sequence, {len(elem.value)} item(s)>"))
+                for i, item in enumerate(elem.value):
+                    walk(item, prefix=f"{prefix}  item{i} ")
+            else:
+                val = str(elem.value)
+                if len(val) > max_value_len:
+                    val = val[:max_value_len] + "..."
+                rows.append(TagRow(tag_str, elem.keyword or "",
+                                   elem.VR or "", val))
+
+    walk(ds)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Header modify (DCMModify)
+# ---------------------------------------------------------------------------
+@dataclass
+class ModifyOp:
+    """A single edit. action is 'set' or 'remove'. tag like '00100010'."""
+    tag: str
+    action: str = "set"
+    value: str = ""
+
+
+@dataclass
+class ModifyResult:
+    changed: int = 0
+    failed: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+def _parse_tag(tag: str) -> Tag:
+    tag = tag.strip().replace(" ", "")
+    if "," in tag:
+        g, e = tag.strip("()").split(",")
+        return Tag(int(g, 16), int(e, 16))
+    if len(tag) == 8:
+        return Tag(int(tag[:4], 16), int(tag[4:], 16))
+    raise ValueError(f"Unrecognized tag format: {tag!r}")
+
+
+def modify_files(files: Iterable[Path], ops: list[ModifyOp],
+                 in_place: bool = False, out_dir: Path | None = None,
+                 progress: Progress = _noop) -> ModifyResult:
+    result = ModifyResult()
+    files = [Path(f) for f in files]
+    for i, f in enumerate(files, 1):
+        try:
+            ds = dcmread(str(f), force=True)
+            for op in ops:
+                tag = _parse_tag(op.tag)
+                if op.action == "remove":
+                    if tag in ds:
+                        del ds[tag]
+                else:  # set / update
+                    if tag in ds:
+                        ds[tag].value = op.value
+                    else:
+                        ds.add_new(tag, _guess_vr(tag), op.value)
+            if in_place:
+                dest = f
+            else:
+                base = out_dir or (f.parent / "modified")
+                base.mkdir(parents=True, exist_ok=True)
+                dest = base / f.name
+            ds.save_as(str(dest))
+            result.changed += 1
+            progress(f"[{i}/{len(files)}] Modified {f.name}")
+        except Exception as exc:  # noqa: BLE001
+            result.failed += 1
+            result.errors.append(f"{f.name}: {exc}")
+            progress(f"[{i}/{len(files)}] FAILED {f.name}: {exc}")
+    return result
+
+
+def _guess_vr(tag: Tag) -> str:
+    try:
+        from pydicom.datadict import dictionary_VR
+        return dictionary_VR(tag)
+    except KeyError:
+        return "LO"
+
+
+# ---------------------------------------------------------------------------
+# Multiframe split (DCMSplitMF)
+# ---------------------------------------------------------------------------
+@dataclass
+class SplitResult:
+    frames_written: int = 0
+    files_processed: int = 0
+    skipped: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+def split_multiframe(files: Iterable[Path], out_dir: Path,
+                     progress: Progress = _noop) -> SplitResult:
+    result = SplitResult()
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for f in [Path(x) for x in files]:
+        try:
+            ds = dcmread(str(f), force=True)
+            n = int(getattr(ds, "NumberOfFrames", 1) or 1)
+            if n <= 1:
+                result.skipped += 1
+                progress(f"Skipped {f.name} (single frame)")
+                continue
+            pixels = ds.pixel_array  # shape (frames, rows, cols[, samples])
+            stem = f.stem
+            for frame_idx in range(n):
+                frame = ds.copy()
+                frame.NumberOfFrames = 1
+                frame.SOPInstanceUID = generate_uid()
+                frame.InstanceNumber = frame_idx + 1
+                if hasattr(frame, "file_meta") and frame.file_meta is not None:
+                    frame.file_meta.MediaStorageSOPInstanceUID = \
+                        frame.SOPInstanceUID
+                frame.PixelData = pixels[frame_idx].tobytes()
+                dest = out_dir / f"{stem}_frame{frame_idx + 1:04d}.dcm"
+                frame.save_as(str(dest))
+                result.frames_written += 1
+            result.files_processed += 1
+            progress(f"Split {f.name} into {n} frames")
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{f.name}: {exc}")
+            progress(f"FAILED {f.name}: {exc}")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Folder / exam dump (DCMFolderDumper, DumpExamData)
+# ---------------------------------------------------------------------------
+DUMP_FIELDS = [
+    "PatientID", "PatientName", "PatientBirthDate", "PatientSex",
+    "StudyDate", "StudyTime", "AccessionNumber", "StudyDescription",
+    "Modality", "SeriesNumber", "SeriesDescription", "InstanceNumber",
+    "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID",
+]
+
+
+@dataclass
+class DumpResult:
+    rows: list[dict] = field(default_factory=list)
+    files_read: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+def dump_folder(root: Path, fields: list[str] | None = None,
+                recursive: bool = True, progress: Progress = _noop) -> DumpResult:
+    fields = fields or DUMP_FIELDS
+    result = DumpResult()
+    files = find_dicom_files(root, recursive=recursive)
+    progress(f"Scanning {len(files)} file(s) ...")
+    for i, f in enumerate(files, 1):
+        try:
+            ds = dcmread(str(f), force=True, stop_before_pixels=True)
+            row = {"File": str(f)}
+            for fld in fields:
+                row[fld] = str(getattr(ds, fld, ""))
+            result.rows.append(row)
+            result.files_read += 1
+            if i % 100 == 0:
+                progress(f"  read {i}/{len(files)}")
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"{f.name}: {exc}")
+    progress(f"Read {result.files_read} file(s), {len(result.errors)} error(s).")
+    return result
+
+
+def write_dump_csv(result: DumpResult, out_csv: Path,
+                   fields: list[str] | None = None) -> None:
+    fields = fields or DUMP_FIELDS
+    cols = ["File"] + fields
+    with Path(out_csv).open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(result.rows)
