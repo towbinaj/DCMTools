@@ -14,9 +14,10 @@ from typing import Callable
 import customtkinter as ctk
 
 from ..model import Node
+from .theme import MUTED, mono
 
 
-PAD = 8
+PAD = 10
 
 
 class LogBox(ctk.CTkTextbox):
@@ -24,8 +25,7 @@ class LogBox(ctk.CTkTextbox):
 
     def __init__(self, master, **kw):
         super().__init__(master, **kw)
-        self.configure(state="disabled", wrap="word",
-                       font=ctk.CTkFont(family="Consolas", size=12))
+        self.configure(state="disabled", wrap="word", font=mono(14))
 
     def write(self, message: str) -> None:
         self.configure(state="normal")
@@ -83,7 +83,7 @@ class DestinationPicker(ctk.CTkFrame):
         self.combo = ctk.CTkComboBox(self, values=[], width=380,
                                      command=self._on_select)
         self.combo.grid(row=0, column=1, sticky="ew")
-        self.detail = ctk.CTkLabel(self, text="", text_color="gray",
+        self.detail = ctk.CTkLabel(self, text="", text_color=MUTED,
                                    anchor="w")
         self.detail.grid(row=1, column=1, sticky="w", pady=(2, 0))
         self.grid_columnconfigure(1, weight=1)

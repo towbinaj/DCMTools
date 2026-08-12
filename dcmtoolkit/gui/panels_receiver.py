@@ -15,6 +15,7 @@ from ..net.scp import StoreSCP
 from ..store.naming import FORMATS
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
+from .theme import MUTED
 from .widgets import run_threaded, PAD
 
 
@@ -192,7 +193,7 @@ class ReceiverPanel(ToolPanel):
         self.stop_btn.pack(side="left", padx=PAD)
         ctk.CTkButton(ctrl, text="Save config",
                       command=self._save).pack(side="left", padx=PAD)
-        self.status = ctk.CTkLabel(ctrl, text="Stopped.", text_color="gray")
+        self.status = ctk.CTkLabel(ctrl, text="Stopped.", text_color=MUTED)
         self.status.pack(side="left", padx=PAD)
 
         # Service controls

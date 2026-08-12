@@ -10,6 +10,7 @@ import customtkinter as ctk
 from ..tools import fileops
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
+from .theme import MUTED
 from .widgets import run_threaded, PAD
 
 
@@ -26,7 +27,7 @@ class TagListPanel(ToolPanel):
         bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkButton(bar, text="Open DICOM file...",
                       command=self._open).pack(side="left")
-        self.path_lbl = ctk.CTkLabel(bar, text="", text_color="gray")
+        self.path_lbl = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.path_lbl.pack(side="left", padx=PAD)
 
     def _open(self) -> None:
@@ -67,7 +68,7 @@ class ModifyPanel(ToolPanel):
                       command=self._add_files).pack(side="left")
         ctk.CTkButton(bar, text="Add Folder...",
                       command=self._add_folder).pack(side="left", padx=PAD)
-        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color="gray")
+        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color=MUTED)
         self.count_lbl.pack(side="left", padx=PAD)
 
         opsframe = ctk.CTkFrame(self.body)
@@ -162,7 +163,7 @@ class SplitPanel(ToolPanel):
                       command=self._add_files).pack(side="left")
         ctk.CTkButton(bar, text="Add Folder...",
                       command=self._add_folder).pack(side="left", padx=PAD)
-        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color="gray")
+        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color=MUTED)
         self.count_lbl.pack(side="left", padx=PAD)
 
         outbar = ctk.CTkFrame(self.body, fg_color="transparent")
@@ -170,7 +171,7 @@ class SplitPanel(ToolPanel):
         ctk.CTkButton(outbar, text="Output folder...",
                       command=self._pick_out).pack(side="left")
         self.out_lbl = ctk.CTkLabel(outbar, text="(not set)",
-                                    text_color="gray")
+                                    text_color=MUTED)
         self.out_lbl.pack(side="left", padx=PAD)
 
         self.btn = ctk.CTkButton(self.body, text="Split", command=self._run)
@@ -235,7 +236,7 @@ class DumpPanel(ToolPanel):
         bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkButton(bar, text="Choose folder...",
                       command=self._pick).pack(side="left")
-        self.root_lbl = ctk.CTkLabel(bar, text="(not set)", text_color="gray")
+        self.root_lbl = ctk.CTkLabel(bar, text="(not set)", text_color=MUTED)
         self.root_lbl.pack(side="left", padx=PAD)
 
         self.recursive = ctk.CTkCheckBox(self.body, text="Recurse subfolders")
@@ -304,7 +305,7 @@ class DeidentifyPanel(ToolPanel):
                       command=self._add_folder).pack(side="left", padx=PAD)
         ctk.CTkButton(src, text="Output folder...",
                       command=self._pick_out).pack(side="left")
-        self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color="gray")
+        self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color=MUTED)
         self.count_lbl.pack(side="left", padx=PAD)
 
         form = ctk.CTkScrollableFrame(self.body, height=210)

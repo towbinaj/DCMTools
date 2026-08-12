@@ -9,6 +9,7 @@ import customtkinter as ctk
 
 from .. import paths
 from .base import ToolPanel
+from .theme import MUTED
 from .widgets import PAD
 
 
@@ -30,7 +31,7 @@ class LogPanel(ToolPanel):
         ctk.CTkButton(bar, text="Open log folder", width=120,
                       command=self._open_folder).pack(side="left")
         self.path_lbl = ctk.CTkLabel(bar, text=str(self._logfile),
-                                     text_color="gray")
+                                     text_color=MUTED)
         self.path_lbl.pack(side="left", padx=PAD)
 
         self.body.grid_columnconfigure(0, weight=1)

@@ -12,6 +12,7 @@ from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
                            DeidentifyPanel)
 from .panels_settings import SettingsPanel
 from .panels_logs import LogPanel
+from .theme import MUTED, apply_scale
 
 # Store receiver panel is optional (imports pywin32 lazily for service bits).
 try:
@@ -38,10 +39,11 @@ class App(ctk.CTk):
 
         ctk.set_appearance_mode(self.settings.appearance)
         ctk.set_default_color_theme("blue")
+        apply_scale(self.settings.ui_scale)
 
         self.title(f"{APP_NAME}  v{__version__}")
-        self.geometry("980x680")
-        self.minsize(820, 560)
+        self.geometry("1040x720")
+        self.minsize(860, 580)
 
         icon = paths.resource_dir() / "assets" / "icon.ico"
         if icon.exists():
@@ -54,12 +56,12 @@ class App(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         # Sidebar --------------------------------------------------------
-        self.sidebar = ctk.CTkScrollableFrame(self, width=200,
+        self.sidebar = ctk.CTkScrollableFrame(self, width=212,
                                               corner_radius=0)
         self.sidebar.grid(row=0, column=0, rowspan=2, sticky="nsew")
         ctk.CTkLabel(self.sidebar, text="DICOM\nToolkit",
-                     font=ctk.CTkFont(size=20, weight="bold"),
-                     justify="left").pack(anchor="w", padx=12, pady=(12, 8))
+                     font=ctk.CTkFont(size=22, weight="bold"),
+                     justify="left").pack(anchor="w", padx=14, pady=(14, 10))
 
         # Content --------------------------------------------------------
         self.content = ctk.CTkFrame(self, fg_color="transparent")
@@ -75,11 +77,11 @@ class App(ctk.CTk):
         status = ctk.CTkFrame(self, height=24, corner_radius=0)
         status.grid(row=1, column=1, sticky="ew")
         ctk.CTkLabel(status, text=f"Data: {paths.data_dir()}",
-                     text_color="gray",
+                     text_color=MUTED,
                      font=ctk.CTkFont(size=11)).pack(side="left", padx=8)
         self.ae_status = ctk.CTkLabel(
             status, text=f"My AE: {self.settings.my_aetitle}",
-            text_color="gray", font=ctk.CTkFont(size=11))
+            text_color=MUTED, font=ctk.CTkFont(size=11))
         self.ae_status.pack(side="right", padx=8)
 
         # Show first panel
@@ -96,9 +98,9 @@ class App(ctk.CTk):
 
         for group_name, panel_classes in groups:
             ctk.CTkLabel(self.sidebar, text=group_name.upper(),
-                         font=ctk.CTkFont(size=11, weight="bold"),
-                         text_color="gray").pack(anchor="w", padx=12,
-                                                 pady=(10, 2))
+                         font=ctk.CTkFont(size=12, weight="bold"),
+                         text_color=MUTED).pack(anchor="w", padx=14,
+                                                 pady=(12, 2))
             for cls in panel_classes:
                 key = cls.__name__
                 panel = cls(self.content, self)
@@ -107,11 +109,12 @@ class App(ctk.CTk):
                 self.panels[key] = panel
 
                 btn = ctk.CTkButton(
-                    self.sidebar, text=cls.title, anchor="w",
+                    self.sidebar, text=cls.title, anchor="w", height=34,
+                    font=ctk.CTkFont(size=14),
                     fg_color="transparent", text_color=("gray10", "gray90"),
                     hover_color=("gray75", "gray25"),
                     command=lambda k=key: self.select(k))
-                btn.pack(fill="x", padx=8, pady=1)
+                btn.pack(fill="x", padx=8, pady=2)
                 self._buttons[key] = btn
 
     def select(self, key: str) -> None:

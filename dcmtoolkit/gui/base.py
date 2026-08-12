@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import customtkinter as ctk
 
+from .theme import MUTED
 from .widgets import LogBox, ui_progress, PAD
 
 
@@ -26,7 +27,7 @@ class ToolPanel(ctk.CTkFrame):
                      font=ctk.CTkFont(size=22, weight="bold"),
                      anchor="w").pack(anchor="w")
         if self.description:
-            ctk.CTkLabel(header, text=self.description, text_color="gray",
+            ctk.CTkLabel(header, text=self.description, text_color=MUTED,
                          anchor="w", justify="left").pack(anchor="w")
 
         self.body = ctk.CTkFrame(self)

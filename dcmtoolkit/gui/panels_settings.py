@@ -11,6 +11,7 @@ from .. import config
 from ..importer import (import_legacy, import_any, export_csv, export_json)
 from ..model import Node
 from .base import ToolPanel
+from .theme import SCALE_OPTIONS, apply_scale, scale_name
 from .widgets import PAD
 
 
@@ -83,6 +84,12 @@ class SettingsPanel(ToolPanel):
             command=self._change_appearance)
         self.appearance.set(self.app.settings.appearance)
         self.appearance.grid(row=0, column=3, padx=PAD)
+
+        ctk.CTkLabel(top, text="Text size").grid(row=0, column=4, padx=PAD)
+        self.text_size = ctk.CTkOptionMenu(
+            top, values=list(SCALE_OPTIONS), command=self._change_scale)
+        self.text_size.set(scale_name(self.app.settings.ui_scale))
+        self.text_size.grid(row=0, column=5, padx=PAD)
 
         # Outgoing TLS (used by destinations flagged 'TLS')
         tlsf = ctk.CTkFrame(self.body)
@@ -178,6 +185,10 @@ class SettingsPanel(ToolPanel):
     def _change_appearance(self, mode: str) -> None:
         ctk.set_appearance_mode(mode)
 
+    def _change_scale(self, name: str) -> None:
+        # Apply live so the user can see the effect immediately.
+        apply_scale(SCALE_OPTIONS.get(name, 1.15))
+
     def _import_file(self) -> None:
         path = filedialog.askopenfilename(
             title="Import destinations (CSV or JSON)",
@@ -260,6 +271,8 @@ class SettingsPanel(ToolPanel):
     def _save(self) -> None:
         self.app.settings.my_aetitle = self.my_ae.get().strip() or "DICOMTOOLKIT"
         self.app.settings.appearance = self.appearance.get()
+        self.app.settings.ui_scale = SCALE_OPTIONS.get(self.text_size.get(),
+                                                       1.15)
         self.app.settings.tls_verify = bool(self.tls_verify.get())
         self.app.settings.tls_ca_file = self.tls_ca.get().strip()
         self.app.settings.tls_cert_file = self.tls_cert.get().strip()

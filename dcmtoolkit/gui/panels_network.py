@@ -13,6 +13,7 @@ from pydicom import dcmread
 from ..net import scu
 from ..tools.fileops import find_dicom_files
 from .base import ToolPanel
+from .theme import MUTED
 from .widgets import DestinationPicker, run_threaded, section, PAD
 
 
@@ -68,7 +69,7 @@ class EchoAllPanel(ToolPanel):
         self.test_btn = ctk.CTkButton(bar, text="Test All",
                                       command=self._test_all)
         self.test_btn.pack(side="left")
-        self.summary = ctk.CTkLabel(bar, text="", text_color="gray")
+        self.summary = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.summary.pack(side="left", padx=PAD)
 
         self.table = ctk.CTkScrollableFrame(self.body, height=340)
@@ -105,7 +106,7 @@ class EchoAllPanel(ToolPanel):
                                   f"{node.port})", anchor="w").grid(
                 row=0, column=0, sticky="w")
             status = ctk.CTkLabel(fr, text="—", width=160, anchor="w",
-                                  text_color="gray")
+                                  text_color=MUTED)
             status.grid(row=0, column=1)
             self._rows[self._key(node)] = status
 
@@ -128,7 +129,7 @@ class EchoAllPanel(ToolPanel):
             lbl = self._rows.get(key)
             if lbl:
                 self.after(0, lambda l=lbl: l.configure(text="testing...",
-                                                        text_color="gray"))
+                                                        text_color=MUTED))
 
             def work(n=node):
                 t0 = time.time()
@@ -461,7 +462,7 @@ class RetrievePanel(ToolPanel):
         ctk.CTkButton(outbar, text="Output folder...",
                       command=self._pick_out).pack(side="left")
         self.out_lbl = ctk.CTkLabel(outbar, text="(not set)",
-                                    text_color="gray")
+                                    text_color=MUTED)
         self.out_lbl.pack(side="left", padx=PAD)
         self.retrieve_btn = ctk.CTkButton(outbar, text="Retrieve selected",
                                           command=self._retrieve,
@@ -579,7 +580,7 @@ class StorageCommitPanel(ToolPanel):
                       command=self._add_files).pack(side="left")
         ctk.CTkButton(bar, text="Add Folder...",
                       command=self._add_folder).pack(side="left", padx=PAD)
-        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color="gray")
+        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color=MUTED)
         self.count_lbl.pack(side="left", padx=PAD)
 
         portbar = ctk.CTkFrame(self.body, fg_color="transparent")

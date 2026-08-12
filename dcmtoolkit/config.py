@@ -18,6 +18,7 @@ class Settings:
 
     my_aetitle: str = "DICOMTOOLKIT"
     appearance: str = "system"  # system | light | dark
+    ui_scale: float = 1.15  # global widget/font scale for readability
     # Store Receiver defaults
     scp_aetitle: str = "STORESCP"
     scp_port: int = 104
