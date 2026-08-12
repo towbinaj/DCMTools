@@ -8,8 +8,9 @@ datas = [("assets/icon.ico", "assets")]
 binaries = []
 hiddenimports = []
 
-# CustomTkinter ships theme JSON + assets that must travel with the exe.
-for pkg in ("customtkinter",):
+# CustomTkinter ships theme JSON + assets; tkinterdnd2 ships the tkdnd binaries.
+# Both must travel with the exe.
+for pkg in ("customtkinter", "tkinterdnd2"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

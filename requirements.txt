@@ -12,3 +12,4 @@ pynetdicom==3.0.4
 pywin32==312
 pywin32-ctypes==0.2.3
 setuptools==84.0.0
+tkinterdnd2==0.6.2

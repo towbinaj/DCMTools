@@ -14,6 +14,17 @@ import sys
 def main() -> int:
     argv = sys.argv[1:]
 
+    if argv and argv[0] == "selfcheck":
+        # Headless diagnostic: report optional-feature availability, then exit.
+        from dcmtoolkit.gui.app import App
+        from dcmtoolkit import paths
+        app = App()
+        app.update()
+        (paths.data_dir() / "selfcheck.txt").write_text(
+            f"dnd_ok={app._dnd_ok}\n", encoding="utf-8")
+        app.destroy()
+        return 0
+
     if argv and argv[0] == "service":
         sub = argv[1] if len(argv) > 1 else "help"
         from dcmtoolkit import service

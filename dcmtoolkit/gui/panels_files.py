@@ -307,16 +307,25 @@ class DeidentifyPanel(ToolPanel):
         self.body.grid_rowconfigure(1, weight=1)
         self.body.grid_columnconfigure(0, weight=1)
 
-        src = ctk.CTkFrame(self.body, fg_color="transparent")
+        src = ctk.CTkFrame(self.body, border_width=2,
+                           border_color=("gray70", "gray40"))
         src.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkButton(src, text="Add Files...",
-                      command=self._add_files).pack(side="left")
+                      command=self._add_files).pack(side="left", padx=6,
+                                                    pady=8)
         ctk.CTkButton(src, text="Add Folder...",
-                      command=self._add_folder).pack(side="left", padx=PAD)
+                      command=self._add_folder).pack(side="left", padx=6)
         ctk.CTkButton(src, text="Output folder...",
-                      command=self._pick_out).pack(side="left")
+                      command=self._pick_out).pack(side="left", padx=6)
         self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color=MUTED)
         self.count_lbl.pack(side="left", padx=PAD)
+        self.drop_hint = ctk.CTkLabel(src, text="…or drag files / folders here",
+                                      text_color=MUTED)
+        self.drop_hint.pack(side="right", padx=12)
+        if not self.app.enable_drop(src, self._on_drop):
+            self.drop_hint.configure(text="")
+        else:
+            self.app.enable_drop(self.drop_hint, self._on_drop)
 
         # Form fills the available height (grid weight above), so it uses the
         # whole panel instead of a short scrollbox with empty space below.
@@ -383,6 +392,30 @@ class DeidentifyPanel(ToolPanel):
             self.base_dir = Path(folder)
             self.files.extend(fileops.find_dicom_files(Path(folder)))
         self._update_count()
+
+    def _on_drop(self, dropped: list):
+        paths = [Path(p) for p in dropped]
+        self.files.extend(p for p in paths if p.is_file())
+        folders = [p for p in paths if p.is_dir()]
+        if folders:
+            self.base_dir = folders[0]
+            self.count_lbl.configure(text="Scanning dropped folder(s)...")
+
+            def work():
+                out = []
+                for d in folders:
+                    out.extend(fileops.find_dicom_files(d))
+                return out
+
+            def done(found):
+                self.files.extend(found)
+                self.log.write(f"Added {len(found):,} file(s) from "
+                               f"{len(folders)} dropped folder(s).")
+                self._update_count()
+
+            run_threaded(self, work, done)
+        else:
+            self._update_count()
 
     def _pick_out(self):
         folder = filedialog.askdirectory()

@@ -82,3 +82,10 @@ def log_dir() -> Path:
     d = data_dir() / "logs"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def reports_dir() -> Path:
+    """Folder for per-run send/processing reports (folder status, failures)."""
+    d = data_dir() / "reports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

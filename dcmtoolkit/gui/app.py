@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import customtkinter as ctk
 
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    _HAS_DND = True
+except Exception:  # noqa: BLE001 - drag-drop is optional
+    TkinterDnD = None
+    DND_FILES = None
+    _HAS_DND = False
+
 from .. import APP_NAME, __version__, config, paths
 from ..logging_setup import setup as setup_logging
 from .panels_network import (EchoPanel, SendPanel, QueryMovePanel,
@@ -30,9 +38,19 @@ NAV_GROUPS = [
 ]
 
 
-class App(ctk.CTk):
+_APP_BASES = (ctk.CTk, TkinterDnD.DnDWrapper) if _HAS_DND else (ctk.CTk,)
+
+
+class App(*_APP_BASES):
     def __init__(self):
         super().__init__()
+        self._dnd_ok = False
+        if _HAS_DND:
+            try:
+                self.TkdndVersion = TkinterDnD._require(self)
+                self._dnd_ok = True
+            except Exception:  # noqa: BLE001
+                self._dnd_ok = False
         setup_logging()
         self.settings = config.load_settings()
         self.destinations = config.load_destinations()
@@ -134,6 +152,23 @@ class App(ctk.CTk):
         for k, btn in self._buttons.items():
             btn.configure(fg_color=("gray80", "gray28") if k == key
                           else "transparent")
+
+    def enable_drop(self, widget, on_paths) -> bool:
+        """Register a widget as a file/folder drop target.
+
+        ``on_paths`` receives a list of dropped filesystem paths (strings).
+        Returns False if drag-and-drop is unavailable.
+        """
+        if not self._dnd_ok:
+            return False
+        try:
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind(
+                "<<Drop>>",
+                lambda e: on_paths(list(self.tk.splitlist(e.data))))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     def remember_destination(self, key: str, name: str) -> None:
         """Persist the last-used destination for a given tool."""
