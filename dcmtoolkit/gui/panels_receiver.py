@@ -43,10 +43,17 @@ class ReceiverPanel(ToolPanel):
         self.scp: StoreSCP | None = None
         cfg = config.load_receiver_config()
 
-        form = ctk.CTkScrollableFrame(self.body, height=300)
-        form.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        form.grid_columnconfigure(1, weight=1)
+        # Let the config form fill the panel; keep the log a short strip.
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.log.configure(height=90)
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_rowconfigure(0, weight=1)
         self.body.grid_columnconfigure(0, weight=1)
+
+        form = ctk.CTkScrollableFrame(self.body)
+        form.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        form.grid_columnconfigure(1, weight=1)
         r = 0
 
         def row(label, widget):

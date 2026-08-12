@@ -297,6 +297,16 @@ class DeidentifyPanel(ToolPanel):
         self.base_dir: Path | None = None
         self.out_dir: Path | None = None
 
+        # Let the form fill the available space and keep the log a short strip.
+        self.grid_rowconfigure(1, weight=1)   # body (form) expands
+        self.grid_rowconfigure(2, weight=0)   # log does not
+        self.log.configure(height=72)         # short progress strip
+        # Base grids body with sticky="ew"; make it fill vertically here so the
+        # form uses the whole panel instead of floating centered.
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_rowconfigure(1, weight=1)
+        self.body.grid_columnconfigure(0, weight=1)
+
         src = ctk.CTkFrame(self.body, fg_color="transparent")
         src.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkButton(src, text="Add Files...",
@@ -308,10 +318,11 @@ class DeidentifyPanel(ToolPanel):
         self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color=MUTED)
         self.count_lbl.pack(side="left", padx=PAD)
 
-        form = ctk.CTkScrollableFrame(self.body, height=210)
-        form.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
+        # Form fills the available height (grid weight above), so it uses the
+        # whole panel instead of a short scrollbox with empty space below.
+        form = ctk.CTkScrollableFrame(self.body)
+        form.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
         form.grid_columnconfigure(1, weight=1)
-        self.body.grid_columnconfigure(0, weight=1)
         r = 0
 
         def row(label, widget):
