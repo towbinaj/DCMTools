@@ -73,9 +73,11 @@ def ui_progress(widget, logbox: LogBox) -> Callable[[str], None]:
 class DestinationPicker(ctk.CTkFrame):
     """Dropdown of saved destinations, resolving to a :class:`Node`."""
 
-    def __init__(self, master, app, label: str = "Destination", **kw):
+    def __init__(self, master, app, label: str = "Destination",
+                 remember_key: str = "", **kw):
         super().__init__(master, fg_color="transparent", **kw)
         self.app = app
+        self.remember_key = remember_key
         self._nodes: list[Node] = []
 
         ctk.CTkLabel(self, text=label, width=90, anchor="w").grid(
@@ -89,6 +91,12 @@ class DestinationPicker(ctk.CTkFrame):
         self.grid_columnconfigure(1, weight=1)
         self.refresh()
 
+    def _remembered(self) -> str:
+        if self.remember_key:
+            return self.app.settings.last_destinations.get(self.remember_key,
+                                                           "")
+        return ""
+
     def refresh(self) -> None:
         self._nodes = list(self.app.destinations)
         labels = [n.name for n in self._nodes]
@@ -96,7 +104,10 @@ class DestinationPicker(ctk.CTkFrame):
         if labels:
             current = self.combo.get()
             if current not in labels:
-                self.combo.set(labels[0])
+                # Prefer the tool's remembered destination, else the first.
+                remembered = self._remembered()
+                self.combo.set(remembered if remembered in labels
+                               else labels[0])
             self._on_select(self.combo.get())
         else:
             self.combo.set("")
@@ -107,6 +118,8 @@ class DestinationPicker(ctk.CTkFrame):
         if node:
             self.detail.configure(
                 text=f"{node.aetitle} @ {node.host}:{node.port}")
+            if self.remember_key:
+                self.app.remember_destination(self.remember_key, node.name)
 
     def get_node(self) -> Node | None:
         name = self.combo.get()

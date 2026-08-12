@@ -29,6 +29,8 @@ class Settings:
     tls_ca_file: str = ""
     tls_cert_file: str = ""
     tls_key_file: str = ""
+    # Remembered last-used destination per tool: {tool_key: destination_name}
+    last_destinations: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -12,7 +12,7 @@ from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
                            DeidentifyPanel)
 from .panels_settings import SettingsPanel
 from .panels_logs import LogPanel
-from .theme import MUTED, apply_scale
+from .theme import MUTED, apply_scale, tool_color
 
 # Store receiver panel is optional (imports pywin32 lazily for service bits).
 try:
@@ -108,13 +108,19 @@ class App(ctk.CTk):
                 panel.grid_remove()
                 self.panels[key] = panel
 
+                item = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+                item.pack(fill="x", padx=8, pady=2)
+                # per-tool color accent bar
+                ctk.CTkFrame(item, width=5, height=30, corner_radius=3,
+                             fg_color=tool_color(key)).pack(side="left",
+                                                            padx=(0, 6))
                 btn = ctk.CTkButton(
-                    self.sidebar, text=cls.title, anchor="w", height=34,
+                    item, text=cls.title, anchor="w", height=34,
                     font=ctk.CTkFont(size=14),
                     fg_color="transparent", text_color=("gray10", "gray90"),
                     hover_color=("gray75", "gray25"),
                     command=lambda k=key: self.select(k))
-                btn.pack(fill="x", padx=8, pady=2)
+                btn.pack(side="left", fill="x", expand=True)
                 self._buttons[key] = btn
 
     def select(self, key: str) -> None:
@@ -128,6 +134,12 @@ class App(ctk.CTk):
         for k, btn in self._buttons.items():
             btn.configure(fg_color=("gray80", "gray28") if k == key
                           else "transparent")
+
+    def remember_destination(self, key: str, name: str) -> None:
+        """Persist the last-used destination for a given tool."""
+        if self.settings.last_destinations.get(key) != name:
+            self.settings.last_destinations[key] = name
+            config.save_settings(self.settings)
 
     def tls_args_for(self, node):
         """Build pynetdicom tls_args for a destination, or None if plain TCP."""

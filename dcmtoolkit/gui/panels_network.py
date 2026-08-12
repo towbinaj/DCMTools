@@ -22,7 +22,8 @@ class EchoPanel(ToolPanel):
     description = "Verify connectivity to a remote DICOM node (DICOM ping)."
 
     def build(self) -> None:
-        self.picker = DestinationPicker(self.body, self.app)
+        self.picker = DestinationPicker(self.body, self.app,
+                                        remember_key="EchoPanel")
         self.picker.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
 
         self.btn = ctk.CTkButton(self.body, text="Send C-ECHO",
@@ -173,7 +174,8 @@ class SendPanel(ToolPanel):
     description = "Send DICOM files or a folder to a destination."
 
     def build(self) -> None:
-        self.picker = DestinationPicker(self.body, self.app)
+        self.picker = DestinationPicker(self.body, self.app,
+                                        remember_key="SendPanel")
         self.picker.grid(row=0, column=0, columnspan=3, sticky="ew",
                          padx=PAD, pady=PAD)
 
@@ -294,7 +296,8 @@ class QueryMovePanel(ToolPanel):
                   "destination AE (C-MOVE).")
 
     def build(self) -> None:
-        self.picker = DestinationPicker(self.body, self.app, label="Source")
+        self.picker = DestinationPicker(self.body, self.app, label="Source",
+                                        remember_key="QueryMovePanel")
         self.picker.grid(row=0, column=0, columnspan=4, sticky="ew",
                          padx=PAD, pady=PAD)
 
@@ -435,7 +438,8 @@ class RetrievePanel(ToolPanel):
                   "local folder over one association (firewall-friendly).")
 
     def build(self) -> None:
-        self.picker = DestinationPicker(self.body, self.app, label="Source")
+        self.picker = DestinationPicker(self.body, self.app, label="Source",
+                                        remember_key="RetrievePanel")
         self.picker.grid(row=0, column=0, columnspan=4, sticky="ew",
                          padx=PAD, pady=PAD)
 
@@ -570,7 +574,8 @@ class StorageCommitPanel(ToolPanel):
 
     def build(self) -> None:
         self.files: list[Path] = []
-        self.picker = DestinationPicker(self.body, self.app, label="Archive")
+        self.picker = DestinationPicker(self.body, self.app, label="Archive",
+                                        remember_key="StorageCommitPanel")
         self.picker.grid(row=0, column=0, columnspan=4, sticky="ew",
                          padx=PAD, pady=PAD)
 

@@ -37,3 +37,29 @@ def apply_scale(value: float) -> None:
 
 def mono(size: int = 13) -> ctk.CTkFont:
     return ctk.CTkFont(family="Consolas", size=size)
+
+
+# Per-tool accent colors. Mid-tone hexes chosen to stay legible on both light
+# and dark backgrounds. Used for the sidebar accent bar + panel title.
+TOOL_COLORS: dict[str, str] = {
+    "EchoPanel": "#4f9dde",          # blue
+    "EchoAllPanel": "#3fb0a3",       # teal
+    "SendPanel": "#e0894a",          # orange
+    "QueryMovePanel": "#b57edc",     # purple
+    "RetrievePanel": "#5cb85c",      # green
+    "StorageCommitPanel": "#d9695f", # coral
+    "TagListPanel": "#6fa8dc",       # light blue
+    "ModifyPanel": "#d4a017",        # gold
+    "SplitPanel": "#8e79c9",         # violet
+    "DumpPanel": "#4a9ca0",          # dark teal
+    "DeidentifyPanel": "#cf6f9b",    # pink
+    "ReceiverPanel": "#7fa650",      # olive
+    "LogPanel": "#9aa0a6",           # gray
+    "SettingsPanel": "#8a8f94",      # gray
+}
+
+DEFAULT_ACCENT = "#5b9bd5"
+
+
+def tool_color(key: str) -> str:
+    return TOOL_COLORS.get(key, DEFAULT_ACCENT)
