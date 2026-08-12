@@ -126,26 +126,62 @@ def _contexts_for_files(files: list[Path]) -> list:
     return list(contexts.values())
 
 
+def _bulk_transfer_syntaxes() -> list[str]:
+    """Common transfer syntaxes to propose for bulk sends (uncompressed +
+    the widely-used compressed ones). Resolved by name for version safety."""
+    from pydicom import uid as _u
+    names = [
+        "ImplicitVRLittleEndian", "ExplicitVRLittleEndian",
+        "DeflatedExplicitVRLittleEndian", "ExplicitVRBigEndian",
+        "JPEGBaseline8Bit", "JPEGExtended12Bit", "JPEGLosslessP14",
+        "JPEGLossless", "JPEGLosslessSV1", "JPEGLSLossless",
+        "JPEGLSNearLossless", "JPEG2000Lossless", "JPEG2000", "RLELossless",
+    ]
+    out: list[str] = []
+    for n in names:
+        v = getattr(_u, n, None)
+        if v and str(v) not in out:
+            out.append(str(v))
+    return out
+
+
+def _bulk_contexts() -> list:
+    """Propose all standard storage SOP classes with common transfer syntaxes.
+
+    Avoids pre-reading every file (which stalls large sends) and still covers
+    virtually all real-world objects. A single association allows at most 128
+    presentation contexts, so we cap there.
+    """
+    ts = _bulk_transfer_syntaxes()
+    ctxs = [build_context(cx.abstract_syntax, ts)
+            for cx in StoragePresentationContexts]
+    return ctxs[:128]
+
+
+OnFile = Callable[[int, int, Path, bool, str], None]
+
+
 def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
             progress: Progress = _noop,
             should_cancel: Callable[[], bool] | None = None,
             on_frac: Callable[[float], None] | None = None,
-            timeout: int = 30, tls_args=None) -> StoreResult:
+            timeout: int = 30, tls_args=None,
+            on_file: OnFile | None = None, verbose: bool = False) -> StoreResult:
+    """Send DICOM files via C-STORE over one association.
+
+    ``on_file(index, total, path, ok, code)`` is invoked once per file with
+    lightweight data; the UI reads it to render throttled live progress instead
+    of logging every file. ``verbose`` additionally emits a per-file log line.
+    """
     files = [Path(f) for f in files]
     result = StoreResult()
+    total = len(files)
     if not files:
         result.errors.append("No files selected.")
         return result
 
-    contexts = _contexts_for_files(files)
-    if not contexts:
-        result.errors.append("None of the selected files are readable DICOM.")
-        result.failed = len(files)
-        return result
-
     ae = AE(ae_title=my_aetitle)
-    # A single association supports at most 128 presentation contexts.
-    ae.requested_contexts = contexts[:128]
+    ae.requested_contexts = _bulk_contexts()
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 
     scheme = "TLS " if tls_args else ""
@@ -155,42 +191,60 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
                          tls_args=tls_args)
     if not assoc.is_established:
         result.errors.append("Association rejected / aborted / failed.")
-        result.failed = len(files)
+        result.failed = total
         return result
+    progress(f"Association established. Sending {total:,} file(s)...")
+
+    def record(i, f, ok, code):
+        if on_file:
+            on_file(i, total, f, ok, code)
 
     try:
         for i, f in enumerate(files, 1):
             if should_cancel is not None and should_cancel():
-                progress(f"Cancelled after {i - 1} file(s).")
+                progress(f"Cancelled after {i - 1} of {total:,} file(s).")
                 break
+
+            if not assoc.is_established:
+                result.errors.append("Association was lost mid-transfer.")
+                progress("Association lost - stopping.")
+                result.failed += (total - i + 1)
+                break
+
+            ok, code = False, "error"
             try:
                 ds = dcmread(str(f), force=True)
-            except Exception as exc:  # noqa: BLE001
+                if "SOPClassUID" not in ds or "SOPInstanceUID" not in ds:
+                    raise ValueError("not a DICOM object (missing SOP UID)")
+                status = assoc.send_c_store(ds)
+                if status and status.Status == 0x0000:
+                    ok, code = True, "0x0000"
+                    result.sent += 1
+                elif status and status.Status in (0xB000, 0xB006, 0xB007):
+                    ok, code = True, f"0x{status.Status:04x}"
+                    result.sent += 1
+                    result.warnings += 1
+                else:
+                    code = f"0x{status.Status:04x}" if status else "no-response"
+                    result.failed += 1
+                    if len(result.errors) < 5000:
+                        result.errors.append(f"{f}: C-STORE {code}")
+            except Exception as exc:  # noqa: BLE001 - never let one file abort
+                code = "error"
                 result.failed += 1
-                result.errors.append(f"{f.name}: unreadable ({exc})")
-                if on_frac:
-                    on_frac(i / len(files))
-                continue
-            status = assoc.send_c_store(ds)
-            if status and status.Status == 0x0000:
-                result.sent += 1
-                progress(f"[{i}/{len(files)}] Sent {f.name}")
-            elif status and status.Status in (0xB000, 0xB006, 0xB007):
-                result.sent += 1
-                result.warnings += 1
-                progress(f"[{i}/{len(files)}] Sent {f.name} (warning "
-                         f"0x{status.Status:04x})")
-            else:
-                result.failed += 1
-                code = f"0x{status.Status:04x}" if status else "no response"
-                result.errors.append(f"{f.name}: C-STORE status {code}")
-                progress(f"[{i}/{len(files)}] FAILED {f.name} ({code})")
+                if len(result.errors) < 5000:
+                    result.errors.append(f"{f}: {exc}")
+
+            record(i, f, ok, code)
+            if verbose:
+                tag = "Sent" if ok else "FAILED"
+                progress(f"[{i}/{total}] {tag} {f.name} ({code})")
             if on_frac:
-                on_frac(i / len(files))
+                on_frac(i / total)
     finally:
         assoc.release()
 
-    progress(f"Done. Sent {result.sent}, failed {result.failed}.")
+    progress(f"Done. Sent {result.sent:,}, failed {result.failed:,}.")
     return result
 
 

@@ -205,17 +205,42 @@ class SendPanel(ToolPanel):
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
-        self.progress_bar = ctk.CTkProgressBar(runbar, width=260)
+        self.verbose = ctk.CTkCheckBox(runbar, text="Log every file")
+        self.verbose.pack(side="left", padx=PAD)
+        self.save_fail_btn = ctk.CTkButton(runbar, text="Save failures CSV...",
+                                           width=150, state="disabled",
+                                           command=self._save_failures)
+        self.save_fail_btn.pack(side="right")
+
+        # Live status: progress bar + a compact readout + current/stall line.
+        statusf = ctk.CTkFrame(self.body, fg_color="transparent")
+        statusf.grid(row=4, column=0, columnspan=3, sticky="ew", padx=PAD,
+                     pady=(0, PAD))
+        statusf.grid_columnconfigure(0, weight=1)
+        self.body.grid_columnconfigure(0, weight=1)
+        self.progress_bar = ctk.CTkProgressBar(statusf)
         self.progress_bar.set(0)
-        self.progress_bar.pack(side="left", padx=PAD)
+        self.progress_bar.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self.status_lbl = ctk.CTkLabel(
+            statusf, text="Idle.", anchor="w",
+            font=ctk.CTkFont(size=14, weight="bold"))
+        self.status_lbl.grid(row=1, column=0, sticky="w")
+        self.detail_lbl = ctk.CTkLabel(statusf, text="", anchor="w",
+                                       text_color=MUTED)
+        self.detail_lbl.grid(row=2, column=0, sticky="w")
+
         self._cancel_flag = False
+        self._stats = None
+        self._lock = None
+        self._logged_folders: set = set()
+        self._failures: list = []
 
     def on_destinations_changed(self) -> None:
         self.picker.refresh()
 
     def _cancel(self) -> None:
         self._cancel_flag = True
-        self.log.write("Cancelling...")
+        self.log.write("Cancelling (finishing current file)...")
 
     def _add_files(self) -> None:
         paths = filedialog.askopenfilenames(
@@ -226,26 +251,33 @@ class SendPanel(ToolPanel):
 
     def _add_folder(self) -> None:
         folder = filedialog.askdirectory(title="Select folder of DICOM files")
-        if folder:
-            found = find_dicom_files(Path(folder))
+        if not folder:
+            return
+        self.count_lbl.configure(text=f"Scanning {folder} ...")
+
+        def work():
+            return find_dicom_files(Path(folder))
+
+        def done(found):
             self.files.extend(found)
-            self.log.write(f"Found {len(found)} file(s) in {folder}")
-        self._update_count()
+            self.log.write(f"Found {len(found):,} file(s) in {folder}")
+            self._update_count()
+
+        run_threaded(self, work, done)
 
     def _clear(self) -> None:
         self.files = []
         self._update_count()
 
     def _update_count(self) -> None:
-        # de-dupe while preserving order
-        seen = set()
-        uniq = []
-        for f in self.files:
-            if f not in seen:
-                seen.add(f)
-                uniq.append(f)
-        self.files = uniq
-        self.count_lbl.configure(text=f"{len(self.files)} file(s) queued.")
+        self.files = list(dict.fromkeys(self.files))  # de-dupe, keep order
+        self.count_lbl.configure(text=f"{len(self.files):,} file(s) queued.")
+
+    @staticmethod
+    def _fmt(secs: float) -> str:
+        secs = int(secs)
+        h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
     def _run(self) -> None:
         node = self.picker.get_node()
@@ -257,37 +289,148 @@ class SendPanel(ToolPanel):
             return
         self.btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
+        self.save_fail_btn.configure(state="disabled")
         self._cancel_flag = False
+        self._logged_folders = set()
+        self._failures = []
         self.progress_bar.set(0)
-        self.log.write(f"--- Sending {len(self.files)} file(s) to "
-                       f"{node.name} ---")
+
         my_ae = self.app.settings.my_aetitle
         files = list(self.files)
+        total = len(files)
         tls = self.app.tls_args_for(node)
+        verbose = bool(self.verbose.get())
+        self.log.write(f"--- Sending {total:,} file(s) to {node.name} ---")
 
-        def on_frac(frac):
-            self.after(0, lambda: self.progress_bar.set(frac))
+        lock = threading.Lock()
+        self._lock = lock
+        self._stats = {"i": 0, "total": total, "sent": 0, "failed": 0,
+                       "name": "", "folder": "", "start": time.monotonic(),
+                       "last": time.monotonic(), "done": False,
+                       "folders": {}, "order": []}
+
+        def on_file(i, tot, path, ok, code):
+            folder = str(path.parent)
+            with lock:
+                s = self._stats
+                s["i"] = i
+                s["name"] = path.name
+                s["folder"] = folder
+                s["last"] = time.monotonic()
+                fc = s["folders"].get(folder)
+                if fc is None:
+                    fc = [0, 0]
+                    s["folders"][folder] = fc
+                    s["order"].append(folder)
+                if ok:
+                    s["sent"] += 1
+                    fc[0] += 1
+                else:
+                    s["failed"] += 1
+                    fc[1] += 1
 
         def work():
             return scu.c_store(my_ae, node, files, progress=self.progress,
                                should_cancel=lambda: self._cancel_flag,
-                               on_frac=on_frac, timeout=node.timeout,
-                               tls_args=tls)
+                               timeout=node.timeout, tls_args=tls,
+                               on_file=on_file, verbose=verbose)
 
         def done(result):
-            self.log.write(f"[DONE] sent={result.sent} failed={result.failed} "
-                           f"warnings={result.warnings}")
-            for e in result.errors[:20]:
-                self.log.write(f"   {e}")
-            self.btn.configure(state="normal")
-            self.cancel_btn.configure(state="disabled")
+            with lock:
+                self._stats["done"] = True
+            self._finalize(result)
 
         def err(exc, tb):
+            with lock:
+                if self._stats:
+                    self._stats["done"] = True
             self.log.write(f"[ERROR] {exc}")
-            self.btn.configure(state="normal")
-            self.cancel_btn.configure(state="disabled")
+            self._end_ui()
 
         run_threaded(self, work, done, err)
+        self.after(300, self._tick)
+
+    def _tick(self) -> None:
+        s = self._stats
+        if not s:
+            return
+        with self._lock:
+            i, total = s["i"], s["total"]
+            sent, failed = s["sent"], s["failed"]
+            name, folder = s["name"], s["folder"]
+            start, last, done = s["start"], s["last"], s["done"]
+            order = list(s["order"])
+            folders = {k: list(v) for k, v in s["folders"].items()}
+
+        now = time.monotonic()
+        frac = i / total if total else 0
+        self.progress_bar.set(frac)
+        elapsed = now - start
+        rate = i / elapsed if elapsed > 0 else 0
+        txt = (f"{i:,}/{total:,}  ({frac * 100:.1f}%)    {rate:.0f}/s    "
+               f"sent {sent:,}   failed {failed:,}    "
+               f"{self._fmt(elapsed)} elapsed")
+        if rate > 0 and not done:
+            txt += f"    ETA {self._fmt((total - i) / rate)}"
+        self.status_lbl.configure(text=txt)
+
+        cur = f"{Path(folder).name}/{name}" if folder else name
+        stale = now - last
+        detail = f"current: {cur}" if cur else ""
+        if not done and stale > 8:
+            detail += f"      ⚠ no activity for {int(stale)}s"
+        self.detail_lbl.configure(
+            text_color="#d9a441" if (not done and stale > 8) else MUTED)
+        self.detail_lbl.configure(text=detail)
+
+        # Log folders that are fully done (all but the still-active last one).
+        finished = order if done else order[:-1]
+        for fo in finished:
+            if fo not in self._logged_folders:
+                self._logged_folders.add(fo)
+                sc, fcnt = folders[fo]
+                mark = "OK " if fcnt == 0 else "!! "
+                self.log.write(f"{mark}{Path(fo).name}: sent {sc}, "
+                               f"failed {fcnt}")
+
+        if not done:
+            self.after(300, self._tick)
+
+    def _finalize(self, result) -> None:
+        self._tick()  # flush final folder lines + last progress
+        self.log.write(f"[DONE] sent {result.sent:,}, failed "
+                       f"{result.failed:,}, warnings {result.warnings}")
+        self._failures = list(result.errors)
+        if self._failures:
+            self.log.write(f"Failures ({result.failed:,}):")
+            for e in self._failures[:50]:
+                self.log.write(f"   {e}")
+            if len(self._failures) > 50:
+                self.log.write(f"   ...and {len(self._failures) - 50:,} more "
+                               "(use 'Save failures CSV').")
+            self.save_fail_btn.configure(state="normal")
+        self._end_ui()
+
+    def _end_ui(self) -> None:
+        self.btn.configure(state="normal")
+        self.cancel_btn.configure(state="disabled")
+
+    def _save_failures(self) -> None:
+        if not self._failures:
+            return
+        import csv
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv", filetypes=[("CSV", "*.csv")],
+            initialfile="send_failures.csv")
+        if not path:
+            return
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["file", "reason"])
+            for e in self._failures:
+                file_part, _, reason = str(e).partition(": ")
+                w.writerow([file_part, reason])
+        self.log.write(f"Saved {len(self._failures):,} failure(s) to {path}")
 
 
 class QueryMovePanel(ToolPanel):
