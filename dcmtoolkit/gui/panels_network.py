@@ -229,6 +229,9 @@ class SendPanel(ToolPanel):
                                            width=150, state="disabled",
                                            command=self._save_failures)
         self.save_fail_btn.pack(side="right")
+        self.retry_btn = ctk.CTkButton(runbar, text="Retry failed...",
+                                       width=120, command=self._retry_failed)
+        self.retry_btn.pack(side="right", padx=PAD)
 
         # Live status: progress bar + a compact readout + current/stall line.
         statusf = ctk.CTkFrame(self.body, fg_color="transparent")
@@ -264,6 +267,7 @@ class SendPanel(ToolPanel):
         self._lock = None
         self._logged_folders: set = set()
         self._failures: list = []
+        self._failed_paths: list = []
         self._report_fh = None
         self._report_writer = None
         self._report_path = None
@@ -359,6 +363,7 @@ class SendPanel(ToolPanel):
         self._cancel_flag = False
         self._logged_folders = set()
         self._failures = []
+        self._failed_paths = []
         self.progress_bar.set(0)
         for w in self.results.winfo_children():
             w.destroy()
@@ -410,6 +415,7 @@ class SendPanel(ToolPanel):
                 else:
                     s["failed"] += 1
                     fc[1] += 1
+                    self._failed_paths.append(path)
 
         def work():
             return scu.c_store(my_ae, node, files, progress=self.progress,
@@ -556,6 +562,46 @@ class SendPanel(ToolPanel):
                 file_part, _, reason = str(e).partition(": ")
                 w.writerow([file_part, reason])
         self.log.write(f"Saved {len(self._failures):,} failure(s) to {path}")
+
+    def _retry_failed(self) -> None:
+        """Re-queue the failed files from the last run (or a failures CSV)."""
+        retry = list(self._failed_paths)
+        if not retry:
+            # No in-memory failures (e.g. after reopening) - load from a CSV.
+            csv_path = filedialog.askopenfilename(
+                title="Open a failures CSV to retry",
+                initialdir=str(paths.reports_dir()),
+                filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
+            if not csv_path:
+                return
+            retry = self._read_failures_csv(Path(csv_path))
+        if not retry:
+            self.log.write("No failed files to retry.")
+            return
+        # Only keep files that still exist on disk.
+        existing = [p for p in retry if Path(p).exists()]
+        missing = len(retry) - len(existing)
+        self.files = list(dict.fromkeys(Path(p) for p in existing))
+        self._update_count()
+        msg = f"Queued {len(self.files):,} failed file(s) for retry."
+        if missing:
+            msg += f" ({missing:,} no longer on disk, skipped.)"
+        msg += " Review the destination and press Send."
+        self.log.write(msg)
+
+    @staticmethod
+    def _read_failures_csv(path: Path) -> list:
+        out = []
+        try:
+            with open(path, newline="", encoding="utf-8") as fh:
+                reader = csv.reader(fh)
+                next(reader, None)  # header
+                for row in reader:
+                    if row and row[0].strip():
+                        out.append(row[0].strip())
+        except OSError:
+            pass
+        return out
 
 
 class QueryMovePanel(ToolPanel):
