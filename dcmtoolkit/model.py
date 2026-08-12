@@ -22,6 +22,8 @@ class Node:
     host: str
     port: int
     note: str = ""
+    timeout: int = 30
+    tls: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -34,6 +36,8 @@ class Node:
             host=str(d.get("host", "")).strip(),
             port=int(d.get("port", 104) or 104),
             note=str(d.get("note", "")).strip(),
+            timeout=int(d.get("timeout", 30) or 30),
+            tls=bool(d.get("tls", False)),
         )
 
     def validate(self) -> list[str]:

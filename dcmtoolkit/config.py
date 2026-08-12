@@ -23,6 +23,11 @@ class Settings:
     scp_port: int = 104
     scp_save_folder: str = ""
     scp_folder_format: str = "PATIENT"  # UID|FLAT|MINT|MEDIS|PATIENT|STUDY
+    # Outgoing (SCU) TLS - used for destinations flagged tls=True
+    tls_verify: bool = True
+    tls_ca_file: str = ""
+    tls_cert_file: str = ""
+    tls_key_file: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

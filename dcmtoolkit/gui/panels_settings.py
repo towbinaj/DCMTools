@@ -27,13 +27,20 @@ class _DestRow(ctk.CTkFrame):
         self.host = ctk.CTkEntry(self, placeholder_text="Host")
         self.host.insert(0, node.host)
         self.host.grid(row=0, column=2, padx=2, pady=2, sticky="ew")
-        self.port = ctk.CTkEntry(self, width=70, placeholder_text="Port")
+        self.port = ctk.CTkEntry(self, width=64, placeholder_text="Port")
         self.port.insert(0, str(node.port))
         self.port.grid(row=0, column=3, padx=2, pady=2)
+        self.timeout = ctk.CTkEntry(self, width=52, placeholder_text="Tmo")
+        self.timeout.insert(0, str(node.timeout))
+        self.timeout.grid(row=0, column=4, padx=2, pady=2)
+        self.tls = ctk.CTkCheckBox(self, text="TLS", width=48)
+        if node.tls:
+            self.tls.select()
+        self.tls.grid(row=0, column=5, padx=2, pady=2)
         ctk.CTkButton(self, text="X", width=28, fg_color="#a33",
                       hover_color="#c44",
                       command=lambda: on_delete(self)).grid(
-            row=0, column=4, padx=2)
+            row=0, column=6, padx=2)
 
     def to_node(self) -> Node | None:
         if not self.aet.get().strip() and not self.host.get().strip():
@@ -42,9 +49,14 @@ class _DestRow(ctk.CTkFrame):
             port = int(self.port.get().strip() or "104")
         except ValueError:
             port = 104
+        try:
+            timeout = int(self.timeout.get().strip() or "30")
+        except ValueError:
+            timeout = 30
         return Node(name=self.name.get().strip() or self.aet.get().strip(),
                     aetitle=self.aet.get().strip(),
-                    host=self.host.get().strip(), port=port)
+                    host=self.host.get().strip(), port=port,
+                    timeout=timeout, tls=bool(self.tls.get()))
 
 
 class SettingsPanel(ToolPanel):
@@ -72,15 +84,35 @@ class SettingsPanel(ToolPanel):
         self.appearance.set(self.app.settings.appearance)
         self.appearance.grid(row=0, column=3, padx=PAD)
 
+        # Outgoing TLS (used by destinations flagged 'TLS')
+        tlsf = ctk.CTkFrame(self.body)
+        tlsf.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
+        ctk.CTkLabel(tlsf, text="Client TLS (for TLS destinations):",
+                     font=ctk.CTkFont(weight="bold")).grid(
+            row=0, column=0, columnspan=3, padx=PAD, pady=(PAD, 2), sticky="w")
+        self.tls_verify = ctk.CTkCheckBox(tlsf, text="Verify server certificate")
+        if self.app.settings.tls_verify:
+            self.tls_verify.select()
+        self.tls_verify.grid(row=0, column=3, padx=PAD, sticky="w")
+
+        s = self.app.settings
+        self.tls_ca = self._file_row(tlsf, 1, "CA / trust file (verify server)",
+                                     s.tls_ca_file)
+        self.tls_cert = self._file_row(tlsf, 2, "Client cert (mutual TLS)",
+                                       s.tls_cert_file)
+        self.tls_key = self._file_row(tlsf, 3, "Client key (mutual TLS)",
+                                      s.tls_key_file)
+        tlsf.grid_columnconfigure(1, weight=1)
+
         # Destinations editor
         editor = ctk.CTkFrame(self.body)
-        editor.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        editor.grid(row=3, column=0, sticky="nsew", padx=PAD, pady=PAD)
         editor.grid_columnconfigure(0, weight=1)
-        self.body.grid_rowconfigure(1, weight=1)
+        self.body.grid_rowconfigure(3, weight=1)
 
         header = ctk.CTkFrame(editor, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(header, text="Destinations",
+        ctk.CTkLabel(header, text="Destinations  (Tmo = timeout secs)",
                      font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
         ctk.CTkButton(header, text="+ Add", width=70,
                       command=self._add_blank).pack(side="right", padx=2)
@@ -91,7 +123,7 @@ class SettingsPanel(ToolPanel):
         ctk.CTkButton(header, text="Export...", width=80,
                       command=self._export).pack(side="right", padx=2)
 
-        self.rows_frame = ctk.CTkScrollableFrame(editor, height=320)
+        self.rows_frame = ctk.CTkScrollableFrame(editor, height=300)
         self.rows_frame.grid(row=1, column=0, sticky="nsew", pady=PAD)
         self.rows_frame.grid_columnconfigure(0, weight=1)
         editor.grid_rowconfigure(1, weight=1)
@@ -100,8 +132,29 @@ class SettingsPanel(ToolPanel):
         self._load_rows()
 
         ctk.CTkButton(self.body, text="Save settings + destinations",
-                      command=self._save).grid(row=2, column=0, sticky="w",
+                      command=self._save).grid(row=4, column=0, sticky="w",
                                                padx=PAD, pady=PAD)
+
+    def _file_row(self, parent, row: int, label: str, value: str):
+        ctk.CTkLabel(parent, text=label, anchor="w", width=200).grid(
+            row=row, column=0, padx=PAD, pady=2, sticky="w")
+        entry = ctk.CTkEntry(parent)
+        if value:
+            entry.insert(0, value)
+        entry.grid(row=row, column=1, columnspan=2, padx=PAD, pady=2,
+                   sticky="ew")
+        ctk.CTkButton(parent, text="...", width=32,
+                      command=lambda: self._browse_file(entry)).grid(
+            row=row, column=3, padx=PAD, pady=2)
+        return entry
+
+    def _browse_file(self, entry) -> None:
+        f = filedialog.askopenfilename(
+            filetypes=[("Certificates/keys", "*.pem *.crt *.cer *.key"),
+                       ("All files", "*.*")])
+        if f:
+            entry.delete(0, "end")
+            entry.insert(0, f)
 
     def _load_rows(self) -> None:
         for r in self._rows:
@@ -207,6 +260,10 @@ class SettingsPanel(ToolPanel):
     def _save(self) -> None:
         self.app.settings.my_aetitle = self.my_ae.get().strip() or "DICOMTOOLKIT"
         self.app.settings.appearance = self.appearance.get()
+        self.app.settings.tls_verify = bool(self.tls_verify.get())
+        self.app.settings.tls_ca_file = self.tls_ca.get().strip()
+        self.app.settings.tls_cert_file = self.tls_cert.get().strip()
+        self.app.settings.tls_key_file = self.tls_key.get().strip()
         config.save_settings(self.app.settings)
 
         nodes = self._collect_rows()

@@ -82,15 +82,18 @@ class MoveResult:
 # C-ECHO
 # ---------------------------------------------------------------------------
 def c_echo(my_aetitle: str, node: Node, timeout: int = 30,
-           progress: Progress = _noop) -> EchoResult:
+           progress: Progress = _noop, tls_args=None) -> EchoResult:
     ae = AE(ae_title=my_aetitle)
     ae.requested_contexts = VerificationPresentationContexts
     ae.acse_timeout = timeout
     ae.dimse_timeout = timeout
     ae.network_timeout = timeout
 
-    progress(f"Associating with {node.aetitle}@{node.host}:{node.port} ...")
-    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle)
+    scheme = "TLS " if tls_args else ""
+    progress(f"Associating ({scheme}) with {node.aetitle}@{node.host}:"
+             f"{node.port} ...")
+    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
+                         tls_args=tls_args)
     if not assoc.is_established:
         return EchoResult(False, "Association rejected / aborted / failed.")
     try:
@@ -126,7 +129,8 @@ def _contexts_for_files(files: list[Path]) -> list:
 def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
             progress: Progress = _noop,
             should_cancel: Callable[[], bool] | None = None,
-            on_frac: Callable[[float], None] | None = None) -> StoreResult:
+            on_frac: Callable[[float], None] | None = None,
+            timeout: int = 30, tls_args=None) -> StoreResult:
     files = [Path(f) for f in files]
     result = StoreResult()
     if not files:
@@ -142,9 +146,13 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
     ae = AE(ae_title=my_aetitle)
     # A single association supports at most 128 presentation contexts.
     ae.requested_contexts = contexts[:128]
+    ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 
-    progress(f"Associating with {node.aetitle}@{node.host}:{node.port} ...")
-    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle)
+    scheme = "TLS " if tls_args else ""
+    progress(f"Associating ({scheme}) with {node.aetitle}@{node.host}:"
+             f"{node.port} ...")
+    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
+                         tls_args=tls_args)
     if not assoc.is_established:
         result.errors.append("Association rejected / aborted / failed.")
         result.failed = len(files)
@@ -214,7 +222,7 @@ def build_query(level: str, **criteria: str) -> Dataset:
 
 def c_find(my_aetitle: str, node: Node, identifier: Dataset,
            model: str = "STUDY", timeout: int = 60,
-           progress: Progress = _noop) -> FindResult:
+           progress: Progress = _noop, tls_args=None) -> FindResult:
     result = FindResult()
     find_model = _FIND_MODELS[model.upper()]
 
@@ -223,7 +231,8 @@ def c_find(my_aetitle: str, node: Node, identifier: Dataset,
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 
     progress(f"Associating with {node.aetitle}@{node.host}:{node.port} ...")
-    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle)
+    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
+                         tls_args=tls_args)
     if not assoc.is_established:
         result.message = "Association rejected / aborted / failed."
         return result
@@ -247,7 +256,7 @@ def c_find(my_aetitle: str, node: Node, identifier: Dataset,
 # ---------------------------------------------------------------------------
 def c_move(my_aetitle: str, node: Node, dest_aetitle: str,
            identifier: Dataset, model: str = "STUDY", timeout: int = 120,
-           progress: Progress = _noop) -> MoveResult:
+           progress: Progress = _noop, tls_args=None) -> MoveResult:
     result = MoveResult()
     move_model = _MOVE_MODELS[model.upper()]
 
@@ -256,7 +265,8 @@ def c_move(my_aetitle: str, node: Node, dest_aetitle: str,
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 
     progress(f"Requesting move from {node.aetitle} -> {dest_aetitle} ...")
-    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle)
+    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
+                         tls_args=tls_args)
     if not assoc.is_established:
         result.message = "Association rejected / aborted / failed."
         return result
@@ -300,7 +310,7 @@ class GetResult:
 
 def c_get(my_aetitle: str, node: Node, identifier: Dataset, out_dir: Path,
           model: str = "STUDY", timeout: int = 300,
-          progress: Progress = _noop) -> GetResult:
+          progress: Progress = _noop, tls_args=None) -> GetResult:
     """Retrieve objects with C-GET, saving them locally over one association.
 
     Unlike C-MOVE, C-GET streams the objects back on the same connection, so no
@@ -333,7 +343,7 @@ def c_get(my_aetitle: str, node: Node, identifier: Dataset, out_dir: Path,
 
     progress(f"Associating with {node.aetitle}@{node.host}:{node.port} ...")
     assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
-                         ext_neg=roles,
+                         ext_neg=roles, tls_args=tls_args,
                          evt_handlers=[(evt.EVT_C_STORE, handle_store)])
     if not assoc.is_established:
         result.message = "Association rejected / aborted / failed."

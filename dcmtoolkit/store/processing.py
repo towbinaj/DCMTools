@@ -35,6 +35,12 @@ class ReceiverConfig:
     port: int = 104
     save_folder: str = ""
     folder_format: str = "PATIENT"
+    # TLS (secure receiver)
+    tls: bool = False
+    tls_cert_file: str = ""
+    tls_key_file: str = ""
+    tls_ca_file: str = ""
+    require_client_cert: bool = False
     # [ANONYMIZE]
     remove_private_tags: bool = False
     remove_groups: list[str] = field(default_factory=list)   # ["6000", ...]

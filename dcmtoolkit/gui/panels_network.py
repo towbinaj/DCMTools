@@ -39,9 +39,11 @@ class EchoPanel(ToolPanel):
         self.btn.configure(state="disabled")
         self.log.write(f"--- Echo to {node.name} ---")
         my_ae = self.app.settings.my_aetitle
+        tls = self.app.tls_args_for(node)
 
         def work():
-            return scu.c_echo(my_ae, node, progress=self.progress)
+            return scu.c_echo(my_ae, node, timeout=node.timeout,
+                              progress=self.progress, tls_args=tls)
 
         def done(result):
             mark = "OK" if result.success else "FAIL"
@@ -130,7 +132,8 @@ class EchoAllPanel(ToolPanel):
 
             def work(n=node):
                 t0 = time.time()
-                res = scu.c_echo(my_ae, n, timeout=10)
+                res = scu.c_echo(my_ae, n, timeout=min(n.timeout, 15),
+                                 tls_args=self.app.tls_args_for(n))
                 return res, int((time.time() - t0) * 1000)
 
             def done(result, n=node, key=key):
@@ -257,6 +260,7 @@ class SendPanel(ToolPanel):
                        f"{node.name} ---")
         my_ae = self.app.settings.my_aetitle
         files = list(self.files)
+        tls = self.app.tls_args_for(node)
 
         def on_frac(frac):
             self.after(0, lambda: self.progress_bar.set(frac))
@@ -264,7 +268,8 @@ class SendPanel(ToolPanel):
         def work():
             return scu.c_store(my_ae, node, files, progress=self.progress,
                                should_cancel=lambda: self._cancel_flag,
-                               on_frac=on_frac)
+                               on_frac=on_frac, timeout=node.timeout,
+                               tls_args=tls)
 
         def done(result):
             self.log.write(f"[DONE] sent={result.sent} failed={result.failed} "
@@ -356,10 +361,12 @@ class QueryMovePanel(ToolPanel):
                                 NumberOfStudyRelatedInstances="",
                                 **criteria)
         self.log.write("--- C-FIND ---")
+        tls = self.app.tls_args_for(node)
 
         def work():
             return scu.c_find(my_ae, node, ident, model="STUDY",
-                              progress=self.progress)
+                              timeout=node.timeout, progress=self.progress,
+                              tls_args=tls)
 
         def done(result):
             self._matches = result.datasets
@@ -403,10 +410,12 @@ class QueryMovePanel(ToolPanel):
                                 StudyInstanceUID=str(ds.StudyInstanceUID))
         self.move_btn.configure(state="disabled")
         self.log.write(f"--- C-MOVE study to {dest} ---")
+        tls = self.app.tls_args_for(node)
 
         def work():
             return scu.c_move(my_ae, node, dest, ident, model="STUDY",
-                              progress=self.progress)
+                              timeout=max(node.timeout, 120),
+                              progress=self.progress, tls_args=tls)
 
         def done(result):
             self.log.write(f"[DONE] {result.message}")
@@ -488,10 +497,12 @@ class RetrievePanel(ToolPanel):
                                 StudyDescription="", PatientName="",
                                 **criteria)
         self.log.write("--- C-FIND ---")
+        tls = self.app.tls_args_for(node)
 
         def work():
             return scu.c_find(my_ae, node, ident, model="STUDY",
-                              progress=self.progress)
+                              timeout=node.timeout, progress=self.progress,
+                              tls_args=tls)
 
         def done(result):
             self._matches = result.datasets
@@ -533,10 +544,12 @@ class RetrievePanel(ToolPanel):
         out = self.out_dir
         self.retrieve_btn.configure(state="disabled")
         self.log.write(f"--- C-GET -> {out} ---")
+        tls = self.app.tls_args_for(node)
 
         def work():
             return scu.c_get(my_ae, node, ident, out, model="STUDY",
-                             progress=self.progress)
+                             timeout=max(node.timeout, 120),
+                             progress=self.progress, tls_args=tls)
 
         def done(result):
             self.log.write(f"[DONE] {result.message}")

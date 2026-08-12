@@ -43,6 +43,13 @@ class App(ctk.CTk):
         self.geometry("980x680")
         self.minsize(820, 560)
 
+        icon = paths.resource_dir() / "assets" / "icon.ico"
+        if icon.exists():
+            try:
+                self.iconbitmap(str(icon))
+            except Exception:  # noqa: BLE001 - non-fatal on some platforms
+                pass
+
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -118,6 +125,19 @@ class App(ctk.CTk):
         for k, btn in self._buttons.items():
             btn.configure(fg_color=("gray80", "gray28") if k == key
                           else "transparent")
+
+    def tls_args_for(self, node):
+        """Build pynetdicom tls_args for a destination, or None if plain TCP."""
+        if not getattr(node, "tls", False):
+            return None
+        from ..net.tls import client_context
+        ctx = client_context(
+            ca_file=self.settings.tls_ca_file,
+            cert_file=self.settings.tls_cert_file,
+            key_file=self.settings.tls_key_file,
+            verify=self.settings.tls_verify,
+        )
+        return (ctx, node.host)
 
     def broadcast_destinations_changed(self) -> None:
         self.ae_status.configure(text=f"My AE: {self.settings.my_aetitle}")

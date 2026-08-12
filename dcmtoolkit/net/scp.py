@@ -69,12 +69,25 @@ class StoreSCP:
             (evt.EVT_C_ECHO, self._handle_echo),
             (evt.EVT_ACCEPTED, self._handle_accepted),
         ]
+
+        ssl_context = None
+        if self.cfg.tls:
+            if not (self.cfg.tls_cert_file and self.cfg.tls_key_file):
+                raise RuntimeError(
+                    "TLS receiver requires a certificate and key file.")
+            from .tls import server_context
+            ssl_context = server_context(
+                self.cfg.tls_cert_file, self.cfg.tls_key_file,
+                ca_file=self.cfg.tls_ca_file,
+                require_client_cert=self.cfg.require_client_cert)
+
         self._server = ae.start_server(
-            ("0.0.0.0", self.cfg.port), block=False, evt_handlers=handlers)
+            ("0.0.0.0", self.cfg.port), block=False, evt_handlers=handlers,
+            ssl_context=ssl_context)
         self.stats.listening = True
         self.stats.started_at = time.time()
-        log.info("Store SCP listening on port %d as %s",
-                 self.cfg.port, self.cfg.aetitle)
+        log.info("Store SCP listening on port %d as %s (TLS=%s)",
+                 self.cfg.port, self.cfg.aetitle, bool(ssl_context))
         self._emit()
 
     def stop(self) -> None:

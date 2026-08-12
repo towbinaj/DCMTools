@@ -32,6 +32,16 @@ on the maintained [pydicom](https://pydicom.github.io/) /
 
 Send now shows a **progress bar + Cancel** for large transfers.
 
+### Secure DICOM (TLS) and timeouts
+- Each destination has a **per-destination timeout** and a **TLS** toggle
+  (Settings tab). Client TLS material (CA/trust file, and an optional client
+  cert + key for mutual TLS) is configured once under **Client TLS**.
+- The **Store Receiver** can require TLS on its listener — supply a server
+  cert + key, and optionally a client CA to require mutual TLS.
+- Hostname checking is disabled by design (PACS/VNA certs rarely match the IP);
+  certificate-chain verification against your CA is still enforced when a CA
+  file is provided.
+
 ## Running
 
 - **Users:** double-click `dist/DICOMToolkit.exe`. No Python install required.

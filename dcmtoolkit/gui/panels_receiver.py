@@ -80,6 +80,47 @@ class ReceiverPanel(ToolPanel):
                      else "PATIENT")
         row("Folder Format", self.fmt)
 
+        # TLS (secure receiver)
+        ctk.CTkLabel(form, text="TLS (secure receiver)",
+                     font=ctk.CTkFont(weight="bold")).grid(
+            row=r, column=0, sticky="w", padx=PAD, pady=(8, 0)); r += 1
+        self.tls = ctk.CTkCheckBox(form, text="Require TLS on this listener")
+        if cfg.tls:
+            self.tls.select()
+        row("", self.tls)
+        certbar = ctk.CTkFrame(form, fg_color="transparent")
+        self.tls_cert = ctk.CTkEntry(certbar, width=360)
+        if cfg.tls_cert_file:
+            self.tls_cert.insert(0, cfg.tls_cert_file)
+        self.tls_cert.pack(side="left")
+        ctk.CTkButton(certbar, text="...", width=32,
+                      command=lambda: self._browse_into(self.tls_cert)).pack(
+            side="left", padx=4)
+        row("Server cert (.pem)", certbar)
+        keybar = ctk.CTkFrame(form, fg_color="transparent")
+        self.tls_key = ctk.CTkEntry(keybar, width=360)
+        if cfg.tls_key_file:
+            self.tls_key.insert(0, cfg.tls_key_file)
+        self.tls_key.pack(side="left")
+        ctk.CTkButton(keybar, text="...", width=32,
+                      command=lambda: self._browse_into(self.tls_key)).pack(
+            side="left", padx=4)
+        row("Server key (.pem)", keybar)
+        cabar = ctk.CTkFrame(form, fg_color="transparent")
+        self.tls_ca = ctk.CTkEntry(cabar, width=360)
+        if cfg.tls_ca_file:
+            self.tls_ca.insert(0, cfg.tls_ca_file)
+        self.tls_ca.pack(side="left")
+        ctk.CTkButton(cabar, text="...", width=32,
+                      command=lambda: self._browse_into(self.tls_ca)).pack(
+            side="left", padx=4)
+        row("Client CA (optional)", cabar)
+        self.require_client = ctk.CTkCheckBox(
+            form, text="Require client certificate (mutual TLS)")
+        if cfg.require_client_cert:
+            self.require_client.select()
+        row("", self.require_client)
+
         # [ANONYMIZE]
         ctk.CTkLabel(form, text="Anonymize",
                      font=ctk.CTkFont(weight="bold")).grid(
@@ -189,6 +230,11 @@ class ReceiverPanel(ToolPanel):
             port=to_int(self.port.get(), 104),
             save_folder=self.save_folder.get().strip(),
             folder_format=self.fmt.get(),
+            tls=bool(self.tls.get()),
+            tls_cert_file=self.tls_cert.get().strip(),
+            tls_key_file=self.tls_key.get().strip(),
+            tls_ca_file=self.tls_ca.get().strip(),
+            require_client_cert=bool(self.require_client.get()),
             remove_private_tags=bool(self.rm_private.get()),
             remove_groups=_split(self.rm_groups.get()),
             remove_tags=_split(self.rm_tags.get()),
