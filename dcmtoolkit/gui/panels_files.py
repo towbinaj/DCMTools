@@ -455,7 +455,8 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             self.app, self.body, self._on_drop, "De-identify",
             [("Add Files...", self._add_files, 110),
              ("Add Folder...", self._add_folder, 120),
-             ("Output folder...", self._pick_out, 130)])
+             ("Output folder...", self._pick_out, 130),
+             ("Clear", self._clear, 70)])
         zone.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
 
         form = ctk.CTkScrollableFrame(self.body, height=230)

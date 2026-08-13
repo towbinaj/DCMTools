@@ -672,6 +672,8 @@ class StorageCommitPanel(ToolPanel):
                       command=self._add_files).pack(side="left")
         ctk.CTkButton(bar, text="Add Folder...",
                       command=self._add_folder).pack(side="left", padx=PAD)
+        ctk.CTkButton(bar, text="Clear", width=70,
+                      command=self._clear).pack(side="left", padx=PAD)
         self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color=MUTED)
         self.count_lbl.pack(side="left", padx=PAD)
 
@@ -705,6 +707,10 @@ class StorageCommitPanel(ToolPanel):
     def _update_count(self):
         self.files = list(dict.fromkeys(self.files))
         self.count_lbl.configure(text=f"{len(self.files)} file(s).")
+
+    def _clear(self):
+        self.files = []
+        self._update_count()
 
     def _run(self):
         node = self.picker.get_node()
