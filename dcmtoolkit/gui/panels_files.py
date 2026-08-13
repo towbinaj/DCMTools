@@ -10,6 +10,7 @@ import customtkinter as ctk
 from ..tools import fileops
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
+from .batch import BatchRunner
 from .theme import MUTED
 from .widgets import run_threaded, PAD
 
@@ -55,25 +56,106 @@ class TagListPanel(ToolPanel):
         run_threaded(self, work, done, err)
 
 
-class ModifyPanel(ToolPanel):
+class _DropSourceMixin:
+    """Shared Add Files / Add Folder / drag-drop into ``self.files``."""
+
+    def _make_source(self, extra=None):
+        src = ctk.CTkFrame(self.body, border_width=2,
+                           border_color=("gray70", "gray40"))
+        ctk.CTkButton(src, text="Add Files...",
+                      command=self._add_files).pack(side="left", padx=6,
+                                                    pady=8)
+        ctk.CTkButton(src, text="Add Folder...",
+                      command=self._add_folder).pack(side="left", padx=6)
+        if extra:
+            extra(src)
+        self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color=MUTED)
+        self.count_lbl.pack(side="left", padx=PAD)
+        self.drop_hint = ctk.CTkLabel(src, text="…or drag files / folders here",
+                                      text_color=MUTED)
+        self.drop_hint.pack(side="right", padx=12)
+        if self.app.enable_drop(src, self._on_drop):
+            self.app.enable_drop(self.drop_hint, self._on_drop)
+        else:
+            self.drop_hint.configure(text="")
+        return src
+
+    def _add_files(self):
+        chosen = filedialog.askopenfilenames(
+            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
+        self.files.extend(Path(p) for p in chosen)
+        self._update_count()
+
+    def _add_folder(self):
+        folder = filedialog.askdirectory()
+        if not folder:
+            return
+        self.count_lbl.configure(text="Scanning folder...")
+
+        def work():
+            return fileops.find_dicom_files(Path(folder))
+
+        def done(found):
+            self.files.extend(found)
+            self.log.write(f"Added {len(found):,} file(s) from {folder}")
+            self._update_count()
+
+        run_threaded(self, work, done)
+
+    def _on_drop(self, dropped: list):
+        chosen = [Path(p) for p in dropped]
+        self.files.extend(p for p in chosen if p.is_file())
+        folders = [p for p in chosen if p.is_dir()]
+        if folders:
+            self.count_lbl.configure(text="Scanning dropped folder(s)...")
+
+            def work():
+                out = []
+                for d in folders:
+                    out.extend(fileops.find_dicom_files(d))
+                return out
+
+            def done(found):
+                self.files.extend(found)
+                self.log.write(f"Added {len(found):,} file(s) from "
+                               f"{len(folders)} dropped folder(s).")
+                self._update_count()
+
+            run_threaded(self, work, done)
+        else:
+            self._update_count()
+
+    def _update_count(self):
+        self.files = list(dict.fromkeys(self.files))
+        self.count_lbl.configure(text=f"{len(self.files):,} file(s).")
+
+    def requeue(self, requeue_paths: list):
+        self.files = list(dict.fromkeys(Path(p) for p in requeue_paths))
+        self._update_count()
+
+    def _cancel(self):
+        self.runner.cancel()
+
+
+class ModifyPanel(_DropSourceMixin, ToolPanel):
     title = "Modify Header"
     description = ("Set or remove tags across files. Tags as ggggeeee "
                    "(e.g. 00100010).")
 
     def build(self) -> None:
         self.files: list[Path] = []
-        bar = ctk.CTkFrame(self.body, fg_color="transparent")
-        bar.grid(row=0, column=0, columnspan=4, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkButton(bar, text="Add Files...",
-                      command=self._add_files).pack(side="left")
-        ctk.CTkButton(bar, text="Add Folder...",
-                      command=self._add_folder).pack(side="left", padx=PAD)
-        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color=MUTED)
-        self.count_lbl.pack(side="left", padx=PAD)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.log.configure(height=80)
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(4, weight=1)
+
+        self._make_source().grid(row=0, column=0, sticky="ew", padx=PAD,
+                                 pady=PAD)
 
         opsframe = ctk.CTkFrame(self.body)
-        opsframe.grid(row=1, column=0, columnspan=4, sticky="ew",
-                      padx=PAD, pady=PAD)
+        opsframe.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkLabel(opsframe, text="Action").grid(row=0, column=0, padx=PAD)
         ctk.CTkLabel(opsframe, text="Tag (ggggeeee)").grid(row=0, column=1)
         ctk.CTkLabel(opsframe, text="New value (for Set)").grid(row=0, column=2)
@@ -88,30 +170,23 @@ class ModifyPanel(ToolPanel):
             val.grid(row=i + 1, column=2, padx=PAD, pady=2)
             self.op_rows.append((action, tag, val))
 
-        self.in_place = ctk.CTkCheckBox(self.body,
-                                        text="Overwrite files in place "
-                                             "(otherwise write to ./modified)")
-        self.in_place.grid(row=2, column=0, columnspan=4, sticky="w",
-                           padx=PAD, pady=PAD)
+        self.in_place = ctk.CTkCheckBox(
+            self.body, text="Overwrite files in place (else write to ./modified)")
+        self.in_place.grid(row=2, column=0, sticky="w", padx=PAD, pady=PAD)
 
-        self.btn = ctk.CTkButton(self.body, text="Apply", command=self._run)
-        self.btn.grid(row=3, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+        btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        btnbar.grid(row=3, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+        self.btn = ctk.CTkButton(btnbar, text="Apply", command=self._run)
+        self.btn.pack(side="left")
+        self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel",
+                                        command=self._cancel, width=80,
+                                        state="disabled", fg_color="#a33",
+                                        hover_color="#c44")
+        self.cancel_btn.pack(side="left", padx=PAD)
 
-    def _add_files(self) -> None:
-        paths = filedialog.askopenfilenames(
-            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        self.files.extend(Path(p) for p in paths)
-        self._update_count()
-
-    def _add_folder(self) -> None:
-        folder = filedialog.askdirectory()
-        if folder:
-            self.files.extend(fileops.find_dicom_files(Path(folder)))
-        self._update_count()
-
-    def _update_count(self) -> None:
-        self.files = list(dict.fromkeys(self.files))
-        self.count_lbl.configure(text=f"{len(self.files)} file(s).")
+        self.runner = BatchRunner(self, verb="changed")
+        self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
+                                          padx=PAD, pady=(0, PAD))
 
     def _run(self) -> None:
         if not self.files:
@@ -120,51 +195,48 @@ class ModifyPanel(ToolPanel):
         ops = []
         for action, tag, val in self.op_rows:
             t = tag.get().strip()
-            if not t:
-                continue
-            ops.append(fileops.ModifyOp(tag=t, action=action.get(),
-                                        value=val.get()))
+            if t:
+                ops.append(fileops.ModifyOp(tag=t, action=action.get(),
+                                            value=val.get()))
         if not ops:
             self.log.write("No operations defined.")
             return
-        self.btn.configure(state="disabled")
-        self.log.write(f"--- Modifying {len(self.files)} file(s) ---")
         files = list(self.files)
+        total = len(files)
         in_place = bool(self.in_place.get())
+        self.btn.configure(state="disabled")
+        self.cancel_btn.configure(state="normal")
+        self.log.write(f"--- Modifying {total:,} file(s) ---")
 
-        def work():
-            return fileops.modify_files(files, ops, in_place=in_place,
-                                        progress=self.progress)
+        def worker():
+            return fileops.modify_files(
+                files, ops, in_place=in_place, progress=self.progress,
+                on_item=self.runner.on_item,
+                should_cancel=lambda: self.runner.cancelled)
 
-        def done(result):
-            self.log.write(f"[DONE] changed={result.changed} "
-                           f"failed={result.failed}")
-            for e in result.errors[:20]:
-                self.log.write(f"   {e}")
+        def on_done():
             self.btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
 
-        def err(exc, tb):
-            self.log.write(f"[ERROR] {exc}")
-            self.btn.configure(state="normal")
-
-        run_threaded(self, work, done, err)
+        self.runner.run(total, "modify", worker, on_done=on_done)
 
 
-class SplitPanel(ToolPanel):
+class SplitPanel(_DropSourceMixin, ToolPanel):
     title = "Split Multiframe"
     description = "Split multi-frame DICOM objects into single-frame files."
 
     def build(self) -> None:
         self.files: list[Path] = []
         self.out_dir: Path | None = None
-        bar = ctk.CTkFrame(self.body, fg_color="transparent")
-        bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkButton(bar, text="Add Files...",
-                      command=self._add_files).pack(side="left")
-        ctk.CTkButton(bar, text="Add Folder...",
-                      command=self._add_folder).pack(side="left", padx=PAD)
-        self.count_lbl = ctk.CTkLabel(bar, text="No files.", text_color=MUTED)
-        self.count_lbl.pack(side="left", padx=PAD)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.log.configure(height=80)
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(3, weight=1)
+
+        self._make_source().grid(row=0, column=0, sticky="ew", padx=PAD,
+                                 pady=PAD)
 
         outbar = ctk.CTkFrame(self.body, fg_color="transparent")
         outbar.grid(row=1, column=0, sticky="ew", padx=PAD)
@@ -174,20 +246,19 @@ class SplitPanel(ToolPanel):
                                     text_color=MUTED)
         self.out_lbl.pack(side="left", padx=PAD)
 
-        self.btn = ctk.CTkButton(self.body, text="Split", command=self._run)
-        self.btn.grid(row=2, column=0, sticky="w", padx=PAD, pady=PAD)
+        btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        btnbar.grid(row=2, column=0, sticky="w", padx=PAD, pady=PAD)
+        self.btn = ctk.CTkButton(btnbar, text="Split", command=self._run)
+        self.btn.pack(side="left")
+        self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel",
+                                        command=self._cancel, width=80,
+                                        state="disabled", fg_color="#a33",
+                                        hover_color="#c44")
+        self.cancel_btn.pack(side="left", padx=PAD)
 
-    def _add_files(self) -> None:
-        paths = filedialog.askopenfilenames(
-            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        self.files.extend(Path(p) for p in paths)
-        self._update_count()
-
-    def _add_folder(self) -> None:
-        folder = filedialog.askdirectory()
-        if folder:
-            self.files.extend(fileops.find_dicom_files(Path(folder)))
-        self._update_count()
+        self.runner = BatchRunner(self, verb="split")
+        self.runner.build(self.body).grid(row=3, column=0, sticky="nsew",
+                                          padx=PAD, pady=(0, PAD))
 
     def _pick_out(self) -> None:
         folder = filedialog.askdirectory()
@@ -195,96 +266,91 @@ class SplitPanel(ToolPanel):
             self.out_dir = Path(folder)
             self.out_lbl.configure(text=folder)
 
-    def _update_count(self) -> None:
-        self.files = list(dict.fromkeys(self.files))
-        self.count_lbl.configure(text=f"{len(self.files)} file(s).")
-
     def _run(self) -> None:
         if not self.files:
             self.log.write("No files selected.")
             return
         out = self.out_dir or (self.files[0].parent / "split")
-        self.btn.configure(state="disabled")
-        self.log.write(f"--- Splitting into {out} ---")
         files = list(self.files)
+        total = len(files)
+        self.btn.configure(state="disabled")
+        self.cancel_btn.configure(state="normal")
+        self.log.write(f"--- Splitting {total:,} file(s) -> {out} ---")
 
-        def work():
-            return fileops.split_multiframe(files, out, progress=self.progress)
+        def worker():
+            return fileops.split_multiframe(
+                files, out, progress=self.progress,
+                on_item=self.runner.on_item,
+                should_cancel=lambda: self.runner.cancelled)
 
-        def done(result):
-            self.log.write(f"[DONE] frames={result.frames_written} "
-                           f"processed={result.files_processed} "
-                           f"skipped={result.skipped}")
-            for e in result.errors[:20]:
-                self.log.write(f"   {e}")
+        def on_done():
             self.btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
 
-        def err(exc, tb):
-            self.log.write(f"[ERROR] {exc}")
-            self.btn.configure(state="normal")
-
-        run_threaded(self, work, done, err)
+        self.runner.run(total, "split", worker, on_done=on_done)
 
 
-class DumpPanel(ToolPanel):
+class DumpPanel(_DropSourceMixin, ToolPanel):
     title = "Folder Dump"
-    description = "Scan a folder and export study/exam metadata to CSV."
+    description = "Scan files/folders and export study/exam metadata to CSV."
 
     def build(self) -> None:
-        self.root: Path | None = None
-        bar = ctk.CTkFrame(self.body, fg_color="transparent")
-        bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkButton(bar, text="Choose folder...",
-                      command=self._pick).pack(side="left")
-        self.root_lbl = ctk.CTkLabel(bar, text="(not set)", text_color=MUTED)
-        self.root_lbl.pack(side="left", padx=PAD)
+        self.files: list[Path] = []
+        self._last_dump = None
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.log.configure(height=80)
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(2, weight=1)
 
-        self.recursive = ctk.CTkCheckBox(self.body, text="Recurse subfolders")
-        self.recursive.select()
-        self.recursive.grid(row=1, column=0, sticky="w", padx=PAD, pady=PAD)
+        self._make_source().grid(row=0, column=0, sticky="ew", padx=PAD,
+                                 pady=PAD)
 
-        self.btn = ctk.CTkButton(self.body, text="Scan + Export CSV",
+        btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        btnbar.grid(row=1, column=0, sticky="w", padx=PAD, pady=PAD)
+        self.btn = ctk.CTkButton(btnbar, text="Scan + Export CSV",
                                  command=self._run)
-        self.btn.grid(row=2, column=0, sticky="w", padx=PAD, pady=(0, PAD))
-        self._result = None
+        self.btn.pack(side="left")
+        self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel",
+                                        command=self._cancel, width=80,
+                                        state="disabled", fg_color="#a33",
+                                        hover_color="#c44")
+        self.cancel_btn.pack(side="left", padx=PAD)
 
-    def _pick(self) -> None:
-        folder = filedialog.askdirectory()
-        if folder:
-            self.root = Path(folder)
-            self.root_lbl.configure(text=folder)
+        self.runner = BatchRunner(self, verb="read")
+        self.runner.build(self.body).grid(row=2, column=0, sticky="nsew",
+                                          padx=PAD, pady=(0, PAD))
 
     def _run(self) -> None:
-        if not self.root:
-            self.log.write("Choose a folder first.")
+        if not self.files:
+            self.log.write("Add files or a folder first.")
             return
+        files = list(self.files)
+        total = len(files)
         self.btn.configure(state="disabled")
-        root = self.root
-        recursive = bool(self.recursive.get())
-        self.log.write(f"--- Dumping {root} ---")
+        self.cancel_btn.configure(state="normal")
+        self.log.write(f"--- Scanning {total:,} file(s) ---")
 
-        def work():
-            return fileops.dump_folder(root, recursive=recursive,
-                                       progress=self.progress)
+        def worker():
+            self._last_dump = fileops.dump_files(
+                files, progress=self.progress, on_item=self.runner.on_item,
+                should_cancel=lambda: self.runner.cancelled)
+            return self._last_dump
 
-        def done(result):
-            self._result = result
-            self.log.write(f"[DONE] {result.files_read} file(s) read.")
-            if result.rows:
+        def on_done():
+            self.btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
+            res = self._last_dump
+            if res and res.rows:
                 out = filedialog.asksaveasfilename(
-                    defaultextension=".csv",
-                    filetypes=[("CSV", "*.csv")],
+                    defaultextension=".csv", filetypes=[("CSV", "*.csv")],
                     initialfile="dump.csv")
                 if out:
-                    fileops.write_dump_csv(result, Path(out))
-                    self.log.write(f"Saved CSV: {out}")
-            self.btn.configure(state="normal")
+                    fileops.write_dump_csv(res, Path(out))
+                    self.log.write(f"Saved {len(res.rows):,} rows to {out}")
 
-        def err(exc, tb):
-            self.log.write(f"[ERROR] {exc}")
-            self.btn.configure(state="normal")
-
-        run_threaded(self, work, done, err)
+        self.runner.run(total, "dump", worker, on_done=on_done)
 
 
 class DeidentifyPanel(ToolPanel):
@@ -297,15 +363,12 @@ class DeidentifyPanel(ToolPanel):
         self.base_dir: Path | None = None
         self.out_dir: Path | None = None
 
-        # Let the form fill the available space and keep the log a short strip.
-        self.grid_rowconfigure(1, weight=1)   # body (form) expands
-        self.grid_rowconfigure(2, weight=0)   # log does not
-        self.log.configure(height=72)         # short progress strip
-        # Base grids body with sticky="ew"; make it fill vertically here so the
-        # form uses the whole panel instead of floating centered.
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.log.configure(height=80)
         self.body.grid_configure(sticky="nsew")
-        self.body.grid_rowconfigure(1, weight=1)
         self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(3, weight=1)
 
         src = ctk.CTkFrame(self.body, border_width=2,
                            border_color=("gray70", "gray40"))
@@ -322,14 +385,12 @@ class DeidentifyPanel(ToolPanel):
         self.drop_hint = ctk.CTkLabel(src, text="…or drag files / folders here",
                                       text_color=MUTED)
         self.drop_hint.pack(side="right", padx=12)
-        if not self.app.enable_drop(src, self._on_drop):
-            self.drop_hint.configure(text="")
-        else:
+        if self.app.enable_drop(src, self._on_drop):
             self.app.enable_drop(self.drop_hint, self._on_drop)
+        else:
+            self.drop_hint.configure(text="")
 
-        # Form fills the available height (grid weight above), so it uses the
-        # whole panel instead of a short scrollbox with empty space below.
-        form = ctk.CTkScrollableFrame(self.body)
+        form = ctk.CTkScrollableFrame(self.body, height=230)
         form.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
         form.grid_columnconfigure(1, weight=1)
         r = 0
@@ -376,27 +437,49 @@ class DeidentifyPanel(ToolPanel):
             side="left", padx=4)
         row("Morph File", morphbar)
 
-        self.btn = ctk.CTkButton(self.body, text="De-identify",
-                                 command=self._run)
-        self.btn.grid(row=2, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+        btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        btnbar.grid(row=2, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+        self.btn = ctk.CTkButton(btnbar, text="De-identify", command=self._run)
+        self.btn.pack(side="left")
+        self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel",
+                                        command=self._cancel, width=80,
+                                        state="disabled", fg_color="#a33",
+                                        hover_color="#c44")
+        self.cancel_btn.pack(side="left", padx=PAD)
+
+        self.runner = BatchRunner(self, verb="written")
+        self.runner.build(self.body).grid(row=3, column=0, sticky="nsew",
+                                          padx=PAD, pady=(0, PAD))
+
+    def _cancel(self):
+        self.runner.cancel()
 
     def _add_files(self):
-        paths = filedialog.askopenfilenames(
+        chosen = filedialog.askopenfilenames(
             filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        self.files.extend(Path(p) for p in paths)
+        self.files.extend(Path(p) for p in chosen)
         self._update_count()
 
     def _add_folder(self):
         folder = filedialog.askdirectory()
         if folder:
             self.base_dir = Path(folder)
-            self.files.extend(fileops.find_dicom_files(Path(folder)))
-        self._update_count()
+            self.count_lbl.configure(text="Scanning folder...")
+
+            def work():
+                return fileops.find_dicom_files(Path(folder))
+
+            def done(found):
+                self.files.extend(found)
+                self.log.write(f"Added {len(found):,} file(s) from {folder}")
+                self._update_count()
+
+            run_threaded(self, work, done)
 
     def _on_drop(self, dropped: list):
-        paths = [Path(p) for p in dropped]
-        self.files.extend(p for p in paths if p.is_file())
-        folders = [p for p in paths if p.is_dir()]
+        chosen = [Path(p) for p in dropped]
+        self.files.extend(p for p in chosen if p.is_file())
+        folders = [p for p in chosen if p.is_dir()]
         if folders:
             self.base_dir = folders[0]
             self.count_lbl.configure(text="Scanning dropped folder(s)...")
@@ -432,7 +515,11 @@ class DeidentifyPanel(ToolPanel):
 
     def _update_count(self):
         self.files = list(dict.fromkeys(self.files))
-        self.count_lbl.configure(text=f"{len(self.files)} file(s).")
+        self.count_lbl.configure(text=f"{len(self.files):,} file(s).")
+
+    def requeue(self, requeue_paths: list):
+        self.files = list(dict.fromkeys(Path(p) for p in requeue_paths))
+        self._update_count()
 
     def _cfg(self) -> ReceiverConfig:
         def to_int(s, d=0):
@@ -464,22 +551,19 @@ class DeidentifyPanel(ToolPanel):
         cfg = self._cfg()
         files = list(self.files)
         base = self.base_dir
+        total = len(files)
         self.btn.configure(state="disabled")
-        self.log.write(f"--- De-identifying {len(files)} file(s) -> {out} ---")
+        self.cancel_btn.configure(state="normal")
+        self.log.write(f"--- De-identifying {total:,} file(s) -> {out} ---")
 
-        def work():
-            return fileops.deidentify_files(files, cfg, out, base_dir=base,
-                                            progress=self.progress)
+        def worker():
+            return fileops.deidentify_files(
+                files, cfg, out, base_dir=base, progress=self.progress,
+                on_item=self.runner.on_item,
+                should_cancel=lambda: self.runner.cancelled)
 
-        def done(result):
-            self.log.write(f"[DONE] wrote={result.written} "
-                           f"failed={result.failed}")
-            for e in result.errors[:20]:
-                self.log.write(f"   {e}")
+        def on_done():
             self.btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
 
-        def err2(exc, tb):
-            self.log.write(f"[ERROR] {exc}")
-            self.btn.configure(state="normal")
-
-        run_threaded(self, work, done, err2)
+        self.runner.run(total, "deident", worker, on_done=on_done)

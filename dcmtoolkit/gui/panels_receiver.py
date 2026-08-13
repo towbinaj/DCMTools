@@ -267,7 +267,9 @@ class ReceiverPanel(ToolPanel):
         cfg = self._gather()
         config.save_receiver_config(cfg)
         try:
-            self.scp = StoreSCP(cfg, on_update=self._on_update)
+            # No per-object callback: a 1 Hz poller reads stats instead, so a
+            # high inbound rate can't flood the UI.
+            self.scp = StoreSCP(cfg)
             self.scp.start()
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Start failed", str(exc))
@@ -277,27 +279,40 @@ class ReceiverPanel(ToolPanel):
         self.stop_btn.configure(state="normal")
         self.log.write(f"Listening on port {cfg.port} as {cfg.aetitle} "
                        f"(format={cfg.folder_format}).")
+        self._last_recv = 0
+        self._last_recv_time = time.monotonic()
+        self._last_logged = 0
+        self._poll_status()
 
     def _stop(self):
         if self.scp:
+            n = self.scp.stats.received
             self.scp.stop()
             self.scp = None
+            self.log.write(f"Receiver stopped. Total received: {n:,}.")
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
         self.status.configure(text="Stopped.")
-        self.log.write("Receiver stopped.")
 
-    def _on_update(self, stats):
-        # Called from the SCP thread; marshal to the UI thread.
-        def apply():
-            up = int(time.time() - stats.started_at) if stats.started_at else 0
-            self.status.configure(
-                text=f"Listening | received {stats.received} | "
-                     f"failed {stats.failed} | up {up}s")
-            if stats.recent:
-                t, summary, rel = stats.recent[0]
-                self.log.write(f"[{t}] {summary}  ->  {rel}")
-        self.after(0, apply)
+    def _poll_status(self):
+        if not self.scp:
+            return
+        s = self.scp.stats
+        now = time.monotonic()
+        dt = now - self._last_recv_time
+        rate = (s.received - self._last_recv) / dt if dt > 0 else 0
+        self._last_recv = s.received
+        self._last_recv_time = now
+        up = int(time.time() - s.started_at) if s.started_at else 0
+        last = s.last_summary or "-"
+        self.status.configure(
+            text=f"Listening on {s.port} | received {s.received:,} | "
+                 f"{rate:.0f}/s | failed {s.failed} | up {up}s | last: {last}")
+        if s.received - self._last_logged >= 500:
+            self._last_logged = s.received
+            self.log.write(f"... received {s.received:,} objects "
+                           f"(last: {last})")
+        self.after(1000, self._poll_status)
 
     def _service(self, cmd: str):
         if sys.platform != "win32":

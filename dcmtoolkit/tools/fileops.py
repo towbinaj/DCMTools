@@ -114,12 +114,19 @@ def _parse_tag(tag: str) -> Tag:
 
 def modify_files(files: Iterable[Path], ops: list[ModifyOp],
                  in_place: bool = False, out_dir: Path | None = None,
-                 progress: Progress = _noop) -> ModifyResult:
+                 progress: Progress = _noop,
+                 on_item=None, should_cancel=None) -> ModifyResult:
     result = ModifyResult()
     files = [Path(f) for f in files]
+    total = len(files)
     for i, f in enumerate(files, 1):
+        if should_cancel is not None and should_cancel():
+            break
+        ok, detail = False, "ok"
         try:
             ds = dcmread(str(f), force=True)
+            if "SOPClassUID" not in ds or "SOPInstanceUID" not in ds:
+                raise ValueError("not a DICOM object (missing SOP UID)")
             for op in ops:
                 tag = _parse_tag(op.tag)
                 if op.action == "remove":
@@ -138,11 +145,14 @@ def modify_files(files: Iterable[Path], ops: list[ModifyOp],
                 dest = base / f.name
             ds.save_as(str(dest))
             result.changed += 1
-            progress(f"[{i}/{len(files)}] Modified {f.name}")
-        except Exception as exc:  # noqa: BLE001
+            ok = True
+        except Exception as exc:  # noqa: BLE001 - never abort the batch
             result.failed += 1
-            result.errors.append(f"{f.name}: {exc}")
-            progress(f"[{i}/{len(files)}] FAILED {f.name}: {exc}")
+            if len(result.errors) < 5000:
+                result.errors.append(f"{f}: {exc}")
+            detail = str(exc)
+        if on_item:
+            on_item(i, total, f, ok, detail)
     return result
 
 
@@ -166,18 +176,28 @@ class SplitResult:
 
 
 def split_multiframe(files: Iterable[Path], out_dir: Path,
-                     progress: Progress = _noop) -> SplitResult:
+                     progress: Progress = _noop,
+                     on_item=None, should_cancel=None) -> SplitResult:
     result = SplitResult()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    files = [Path(x) for x in files]
+    total = len(files)
 
-    for f in [Path(x) for x in files]:
+    for i, f in enumerate(files, 1):
+        if should_cancel is not None and should_cancel():
+            break
+        ok, detail = True, "ok"
         try:
             ds = dcmread(str(f), force=True)
+            if "SOPClassUID" not in ds or "SOPInstanceUID" not in ds:
+                raise ValueError("not a DICOM object (missing SOP UID)")
             n = int(getattr(ds, "NumberOfFrames", 1) or 1)
             if n <= 1:
                 result.skipped += 1
-                progress(f"Skipped {f.name} (single frame)")
+                detail = "single frame"
+                if on_item:
+                    on_item(i, total, f, True, "skipped (single frame)")
                 continue
             pixels = ds.pixel_array  # shape (frames, rows, cols[, samples])
             stem = f.stem
@@ -194,10 +214,14 @@ def split_multiframe(files: Iterable[Path], out_dir: Path,
                 frame.save_as(str(dest))
                 result.frames_written += 1
             result.files_processed += 1
-            progress(f"Split {f.name} into {n} frames")
-        except Exception as exc:  # noqa: BLE001
-            result.errors.append(f"{f.name}: {exc}")
-            progress(f"FAILED {f.name}: {exc}")
+            detail = f"{n} frames"
+        except Exception as exc:  # noqa: BLE001 - never abort the batch
+            ok = False
+            if len(result.errors) < 5000:
+                result.errors.append(f"{f}: {exc}")
+            detail = str(exc)
+        if on_item:
+            on_item(i, total, f, ok, detail)
     return result
 
 
@@ -219,26 +243,45 @@ class DumpResult:
     errors: list[str] = field(default_factory=list)
 
 
-def dump_folder(root: Path, fields: list[str] | None = None,
-                recursive: bool = True, progress: Progress = _noop) -> DumpResult:
+def dump_files(files: Iterable[Path], fields: list[str] | None = None,
+               progress: Progress = _noop,
+               on_item=None, should_cancel=None) -> DumpResult:
     fields = fields or DUMP_FIELDS
     result = DumpResult()
-    files = find_dicom_files(root, recursive=recursive)
-    progress(f"Scanning {len(files)} file(s) ...")
+    files = [Path(f) for f in files]
+    total = len(files)
     for i, f in enumerate(files, 1):
+        if should_cancel is not None and should_cancel():
+            break
+        ok, detail = True, "ok"
         try:
             ds = dcmread(str(f), force=True, stop_before_pixels=True)
+            if "SOPClassUID" not in ds:
+                raise ValueError("not a DICOM object (missing SOP Class UID)")
             row = {"File": str(f)}
             for fld in fields:
                 row[fld] = str(getattr(ds, fld, ""))
             result.rows.append(row)
             result.files_read += 1
-            if i % 100 == 0:
-                progress(f"  read {i}/{len(files)}")
-        except Exception as exc:  # noqa: BLE001
-            result.errors.append(f"{f.name}: {exc}")
-    progress(f"Read {result.files_read} file(s), {len(result.errors)} error(s).")
+        except Exception as exc:  # noqa: BLE001 - never abort the batch
+            ok = False
+            if len(result.errors) < 5000:
+                result.errors.append(f"{f}: {exc}")
+            detail = str(exc)
+        if on_item:
+            on_item(i, total, f, ok, detail)
+    progress(f"Read {result.files_read:,} file(s), {len(result.errors):,} "
+             "error(s).")
     return result
+
+
+def dump_folder(root: Path, fields: list[str] | None = None,
+                recursive: bool = True, progress: Progress = _noop,
+                on_item=None, should_cancel=None) -> DumpResult:
+    files = find_dicom_files(root, recursive=recursive)
+    progress(f"Scanning {len(files):,} file(s) ...")
+    return dump_files(files, fields=fields, progress=progress,
+                      on_item=on_item, should_cancel=should_cancel)
 
 
 def write_dump_csv(result: DumpResult, out_csv: Path,
@@ -263,7 +306,8 @@ class DeidentResult:
 
 def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
                      base_dir: Path | None = None,
-                     progress: Progress = _noop) -> DeidentResult:
+                     progress: Progress = _noop,
+                     on_item=None, should_cancel=None) -> DeidentResult:
     """Apply the anonymize/morph/pixel-blank Processor to files, saving copies.
 
     ``cfg`` is a ``store.processing.ReceiverConfig``. Output structure mirrors
@@ -273,6 +317,7 @@ def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
     from ..store.processing import Processor  # lazy: avoids import cycle
 
     files = [Path(f) for f in files]
+    total = len(files)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     proc = Processor(cfg)
@@ -280,8 +325,13 @@ def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
     used: set[Path] = set()
 
     for i, f in enumerate(files, 1):
+        if should_cancel is not None and should_cancel():
+            break
+        ok, detail = False, "ok"
         try:
             ds = dcmread(str(f), force=True)
+            if "SOPClassUID" not in ds or "SOPInstanceUID" not in ds:
+                raise ValueError("not a DICOM object (missing SOP UID)")
             proc.process(ds)
             if base_dir is not None:
                 try:
@@ -291,17 +341,19 @@ def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
                 dest = out_dir / rel
             else:
                 dest = out_dir / f.name
-            # avoid clobbering / collisions
             while dest in used or dest.resolve() == f.resolve():
                 dest = dest.with_stem(dest.stem + "_1")
             dest.parent.mkdir(parents=True, exist_ok=True)
             ds.save_as(str(dest), enforce_file_format=True)
             used.add(dest)
             result.written += 1
-            progress(f"[{i}/{len(files)}] {f.name} -> {dest.name}")
-        except Exception as exc:  # noqa: BLE001
+            ok, detail = True, dest.name
+        except Exception as exc:  # noqa: BLE001 - never abort the batch
             result.failed += 1
-            result.errors.append(f"{f.name}: {exc}")
-            progress(f"[{i}/{len(files)}] FAILED {f.name}: {exc}")
-    progress(f"Done. Wrote {result.written}, failed {result.failed}.")
+            if len(result.errors) < 5000:
+                result.errors.append(f"{f}: {exc}")
+            detail = str(exc)
+        if on_item:
+            on_item(i, total, f, ok, detail)
+    progress(f"Done. Wrote {result.written:,}, failed {result.failed:,}.")
     return result

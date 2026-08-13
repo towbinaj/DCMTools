@@ -16,6 +16,7 @@ from .. import paths
 from ..net import scu
 from ..tools.fileops import find_dicom_files
 from .base import ToolPanel
+from .batch import BatchRunner
 from .theme import MUTED
 from .widgets import DestinationPicker, run_threaded, section, PAD
 
@@ -177,27 +178,21 @@ class SendPanel(ToolPanel):
     description = "Send DICOM files or a folder to a destination."
 
     def build(self) -> None:
-        # Layout: keep the milestone log a short strip; give the per-folder
-        # results table the room.
         self.grid_rowconfigure(1, weight=1)
         self.grid_rowconfigure(2, weight=0)
         self.log.configure(height=90)
         self.body.grid_configure(sticky="nsew")
         self.body.grid_columnconfigure(0, weight=1)
-        self.body.grid_rowconfigure(6, weight=1)
+        self.body.grid_rowconfigure(5, weight=1)
 
         self.picker = DestinationPicker(self.body, self.app,
                                         remember_key="SendPanel")
-        self.picker.grid(row=0, column=0, columnspan=3, sticky="ew",
-                         padx=PAD, pady=PAD)
+        self.picker.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
 
         self.files: list[Path] = []
-
-        # Drop zone containing the add buttons (drop files/folders anywhere on it)
         dropf = ctk.CTkFrame(self.body, border_width=2,
                              border_color=("gray70", "gray40"))
-        dropf.grid(row=1, column=0, columnspan=3, sticky="ew", padx=PAD,
-                   pady=PAD)
+        dropf.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkButton(dropf, text="Add Files...", command=self._add_files).pack(
             side="left", padx=6, pady=8)
         ctk.CTkButton(dropf, text="Add Folder...",
@@ -211,11 +206,10 @@ class SendPanel(ToolPanel):
 
         self.count_lbl = ctk.CTkLabel(self.body, text="No files selected.",
                                       anchor="w")
-        self.count_lbl.grid(row=2, column=0, columnspan=3, sticky="w", padx=PAD)
+        self.count_lbl.grid(row=2, column=0, sticky="w", padx=PAD)
 
         runbar = ctk.CTkFrame(self.body, fg_color="transparent")
-        runbar.grid(row=3, column=0, columnspan=3, sticky="ew", padx=PAD,
-                    pady=(PAD, 0))
+        runbar.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
         self.btn = ctk.CTkButton(runbar, text="Send", command=self._run)
         self.btn.pack(side="left")
         self.cancel_btn = ctk.CTkButton(runbar, text="Cancel",
@@ -223,100 +217,27 @@ class SendPanel(ToolPanel):
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
-        self.verbose = ctk.CTkCheckBox(runbar, text="Log every file")
-        self.verbose.pack(side="left", padx=PAD)
-        self.save_fail_btn = ctk.CTkButton(runbar, text="Save failures CSV...",
-                                           width=150, state="disabled",
-                                           command=self._save_failures)
-        self.save_fail_btn.pack(side="right")
-        self.retry_btn = ctk.CTkButton(runbar, text="Retry failed...",
-                                       width=120, command=self._retry_failed)
-        self.retry_btn.pack(side="right", padx=PAD)
 
-        # Live status: progress bar + a compact readout + current/stall line.
-        statusf = ctk.CTkFrame(self.body, fg_color="transparent")
-        statusf.grid(row=4, column=0, columnspan=3, sticky="ew", padx=PAD,
-                     pady=(PAD, 0))
-        statusf.grid_columnconfigure(0, weight=1)
-        self.progress_bar = ctk.CTkProgressBar(statusf)
-        self.progress_bar.set(0)
-        self.progress_bar.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-        self.status_lbl = ctk.CTkLabel(
-            statusf, text="Idle.", anchor="w",
-            font=ctk.CTkFont(size=14, weight="bold"))
-        self.status_lbl.grid(row=1, column=0, sticky="w")
-        self.detail_lbl = ctk.CTkLabel(statusf, text="", anchor="w",
-                                       text_color=MUTED)
-        self.detail_lbl.grid(row=2, column=0, sticky="w")
+        self.runner = BatchRunner(self, verb="sent")
+        self.runner.build(self.body).grid(row=5, column=0, sticky="nsew",
+                                          padx=PAD, pady=PAD)
 
-        # Per-folder results: summary + a table of folders that had failures.
-        self.folder_summary = ctk.CTkLabel(
-            self.body, text="", anchor="w",
-            font=ctk.CTkFont(size=13, weight="bold"))
-        self.folder_summary.grid(row=5, column=0, columnspan=3, sticky="w",
-                                 padx=PAD, pady=(PAD, 0))
-        self.results = ctk.CTkScrollableFrame(
-            self.body, label_text="Folders needing attention (failures)")
-        self.results.grid(row=6, column=0, columnspan=3, sticky="nsew",
-                          padx=PAD, pady=(2, PAD))
-        self.results.grid_columnconfigure(0, weight=1)
-        self._result_rows: dict = {}
-
-        self._cancel_flag = False
-        self._stats = None
-        self._lock = None
-        self._logged_folders: set = set()
-        self._failures: list = []
-        self._failed_paths: list = []
-        self._report_fh = None
-        self._report_writer = None
-        self._report_path = None
-
-        # Enable drag-and-drop onto the drop zone (and the table).
-        dropped = self.app.enable_drop(dropf, self._on_drop)
-        self.app.enable_drop(self.drop_hint, self._on_drop)
-        self.app.enable_drop(self.results, self._on_drop)
-        if not dropped:
-            self.drop_hint.configure(text="")
-
-    def _on_drop(self, paths: list) -> None:
-        paths = [Path(p) for p in paths]
-        files = [p for p in paths if p.is_file()]
-        folders = [p for p in paths if p.is_dir()]
-        self.files.extend(files)
-        if folders:
-            self.count_lbl.configure(text="Scanning dropped folder(s)...")
-
-            def work():
-                out = []
-                for d in folders:
-                    out.extend(find_dicom_files(d))
-                return out
-
-            def done(found):
-                self.files.extend(found)
-                self.log.write(f"Added {len(found):,} file(s) from "
-                               f"{len(folders)} dropped folder(s).")
-                self._update_count()
-
-            run_threaded(self, work, done)
+        if self.app.enable_drop(dropf, self._on_drop):
+            self.app.enable_drop(self.drop_hint, self._on_drop)
         else:
-            if files:
-                self.log.write(f"Added {len(files):,} dropped file(s).")
-            self._update_count()
+            self.drop_hint.configure(text="")
 
     def on_destinations_changed(self) -> None:
         self.picker.refresh()
 
     def _cancel(self) -> None:
-        self._cancel_flag = True
-        self.log.write("Cancelling (finishing current file)...")
+        self.runner.cancel()
 
     def _add_files(self) -> None:
-        paths = filedialog.askopenfilenames(
+        chosen = filedialog.askopenfilenames(
             title="Select DICOM files",
             filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        self.files.extend(Path(p) for p in paths)
+        self.files.extend(Path(p) for p in chosen)
         self._update_count()
 
     def _add_folder(self) -> None:
@@ -335,19 +256,40 @@ class SendPanel(ToolPanel):
 
         run_threaded(self, work, done)
 
+    def _on_drop(self, dropped: list) -> None:
+        chosen = [Path(p) for p in dropped]
+        self.files.extend(p for p in chosen if p.is_file())
+        folders = [p for p in chosen if p.is_dir()]
+        if folders:
+            self.count_lbl.configure(text="Scanning dropped folder(s)...")
+
+            def work():
+                out = []
+                for d in folders:
+                    out.extend(find_dicom_files(d))
+                return out
+
+            def done(found):
+                self.files.extend(found)
+                self.log.write(f"Added {len(found):,} file(s) from "
+                               f"{len(folders)} dropped folder(s).")
+                self._update_count()
+
+            run_threaded(self, work, done)
+        else:
+            self._update_count()
+
     def _clear(self) -> None:
         self.files = []
         self._update_count()
 
     def _update_count(self) -> None:
-        self.files = list(dict.fromkeys(self.files))  # de-dupe, keep order
+        self.files = list(dict.fromkeys(self.files))
         self.count_lbl.configure(text=f"{len(self.files):,} file(s) queued.")
 
-    @staticmethod
-    def _fmt(secs: float) -> str:
-        secs = int(secs)
-        h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
-        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+    def requeue(self, requeue_paths: list) -> None:
+        self.files = list(dict.fromkeys(Path(p) for p in requeue_paths))
+        self._update_count()
 
     def _run(self) -> None:
         node = self.picker.get_node()
@@ -359,249 +301,23 @@ class SendPanel(ToolPanel):
             return
         self.btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.save_fail_btn.configure(state="disabled")
-        self._cancel_flag = False
-        self._logged_folders = set()
-        self._failures = []
-        self._failed_paths = []
-        self.progress_bar.set(0)
-        for w in self.results.winfo_children():
-            w.destroy()
-        self._result_rows = {}
-        self.folder_summary.configure(text="")
-
         my_ae = self.app.settings.my_aetitle
         files = list(self.files)
         total = len(files)
         tls = self.app.tls_args_for(node)
-        verbose = bool(self.verbose.get())
         self.log.write(f"--- Sending {total:,} file(s) to {node.name} ---")
 
-        # Open an incremental per-folder report (survives a crash mid-run).
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._report_path = paths.reports_dir() / f"send_{stamp}_folders.csv"
-        self._failures_path = paths.reports_dir() / f"send_{stamp}_failures.csv"
-        try:
-            self._report_fh = open(self._report_path, "w", newline="",
-                                   encoding="utf-8")
-            self._report_writer = csv.writer(self._report_fh)
-            self._report_writer.writerow(["folder", "sent", "failed", "status"])
-        except OSError:
-            self._report_fh = self._report_writer = None
-
-        lock = threading.Lock()
-        self._lock = lock
-        self._stats = {"i": 0, "total": total, "sent": 0, "failed": 0,
-                       "name": "", "folder": "", "start": time.monotonic(),
-                       "last": time.monotonic(), "done": False,
-                       "folders": {}, "order": []}
-
-        def on_file(i, tot, path, ok, code):
-            folder = str(path.parent)
-            with lock:
-                s = self._stats
-                s["i"] = i
-                s["name"] = path.name
-                s["folder"] = folder
-                s["last"] = time.monotonic()
-                fc = s["folders"].get(folder)
-                if fc is None:
-                    fc = [0, 0]
-                    s["folders"][folder] = fc
-                    s["order"].append(folder)
-                if ok:
-                    s["sent"] += 1
-                    fc[0] += 1
-                else:
-                    s["failed"] += 1
-                    fc[1] += 1
-                    self._failed_paths.append(path)
-
-        def work():
+        def worker():
             return scu.c_store(my_ae, node, files, progress=self.progress,
-                               should_cancel=lambda: self._cancel_flag,
+                               should_cancel=lambda: self.runner.cancelled,
                                timeout=node.timeout, tls_args=tls,
-                               on_file=on_file, verbose=verbose)
+                               on_file=self.runner.on_item)
 
-        def done(result):
-            with lock:
-                self._stats["done"] = True
-            self._finalize(result)
+        def on_done():
+            self.btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
 
-        def err(exc, tb):
-            with lock:
-                if self._stats:
-                    self._stats["done"] = True
-            self.log.write(f"[ERROR] {exc}")
-            self._end_ui()
-
-        run_threaded(self, work, done, err)
-        self.after(300, self._tick)
-
-    def _tick(self) -> None:
-        s = self._stats
-        if not s:
-            return
-        with self._lock:
-            i, total = s["i"], s["total"]
-            sent, failed = s["sent"], s["failed"]
-            name, folder = s["name"], s["folder"]
-            start, last, done = s["start"], s["last"], s["done"]
-            order = list(s["order"])
-            folders = {k: list(v) for k, v in s["folders"].items()}
-
-        now = time.monotonic()
-        frac = i / total if total else 0
-        self.progress_bar.set(frac)
-        elapsed = now - start
-        rate = i / elapsed if elapsed > 0 else 0
-        txt = (f"{i:,}/{total:,}  ({frac * 100:.1f}%)    {rate:.0f}/s    "
-               f"sent {sent:,}   failed {failed:,}    "
-               f"{self._fmt(elapsed)} elapsed")
-        if rate > 0 and not done:
-            txt += f"    ETA {self._fmt((total - i) / rate)}"
-        self.status_lbl.configure(text=txt)
-
-        cur = f"{Path(folder).name}/{name}" if folder else name
-        stale = now - last
-        detail = f"current: {cur}" if cur else ""
-        if not done and stale > 8:
-            detail += f"      ⚠ no activity for {int(stale)}s"
-        self.detail_lbl.configure(
-            text_color="#d9a441" if (not done and stale > 8) else MUTED)
-        self.detail_lbl.configure(text=detail)
-
-        # Folders that are fully done (all but the still-active last one).
-        finished = order if done else order[:-1]
-        for fo in finished:
-            if fo not in self._logged_folders:
-                self._logged_folders.add(fo)
-                sc, fcnt = folders[fo]
-                mark = "OK " if fcnt == 0 else "!! "
-                self.log.write(f"{mark}{Path(fo).name}: sent {sc}, "
-                               f"failed {fcnt}")
-                if self._report_writer:
-                    self._report_writer.writerow(
-                        [fo, sc, fcnt,
-                         "complete" if fcnt == 0 else "has_failures"])
-                    self._report_fh.flush()
-
-        # Folder summary counts + a table listing only folders with failures.
-        done_ct = len(finished)
-        clean = sum(1 for fo in finished if folders[fo][1] == 0)
-        bad = [fo for fo in order if folders[fo][1] > 0]
-        in_prog = len(order) - done_ct
-        self.folder_summary.configure(
-            text=f"Folders — done: {done_ct}   clean: {clean}   "
-                 f"with failures: {len(bad)}   in progress: {in_prog}")
-        for fo in bad:
-            sc, fcnt = folders[fo]
-            self._upsert_result_row(fo, sc, fcnt)
-
-        if not done:
-            self.after(300, self._tick)
-
-    def _upsert_result_row(self, folder: str, sent: int, failed: int) -> None:
-        existing = self._result_rows.get(folder)
-        text = f"{Path(folder).name}    sent {sent}, failed {failed}"
-        if existing is None:
-            lbl = ctk.CTkLabel(self.results, text=text, anchor="w",
-                               text_color="#d9695f")
-            lbl.grid(sticky="ew", padx=4, pady=1)
-            self._result_rows[folder] = lbl
-        else:
-            existing.configure(text=text)
-
-    def _finalize(self, result) -> None:
-        self._tick()  # flush final folder lines + last progress
-        self.log.write(f"[DONE] sent {result.sent:,}, failed "
-                       f"{result.failed:,}, warnings {result.warnings}")
-        self._failures = list(result.errors)
-        if self._report_fh:
-            try:
-                self._report_fh.close()
-            except OSError:
-                pass
-        # Always write a failures CSV when there are failures.
-        if self._failures:
-            try:
-                with open(self._failures_path, "w", newline="",
-                          encoding="utf-8") as fh:
-                    w = csv.writer(fh)
-                    w.writerow(["file", "reason"])
-                    for e in self._failures:
-                        fp, _, reason = str(e).partition(": ")
-                        w.writerow([fp, reason])
-            except OSError:
-                pass
-            self.save_fail_btn.configure(state="normal")
-            self.log.write(f"Failures: {result.failed:,}. Saved report + "
-                           f"failures CSV to {paths.reports_dir()}")
-        else:
-            self.log.write(f"No failures. Folder report saved to "
-                           f"{self._report_path}")
-        self._end_ui()
-
-    def _end_ui(self) -> None:
-        self.btn.configure(state="normal")
-        self.cancel_btn.configure(state="disabled")
-
-    def _save_failures(self) -> None:
-        if not self._failures:
-            return
-        import csv
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV", "*.csv")],
-            initialfile="send_failures.csv")
-        if not path:
-            return
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            w = csv.writer(fh)
-            w.writerow(["file", "reason"])
-            for e in self._failures:
-                file_part, _, reason = str(e).partition(": ")
-                w.writerow([file_part, reason])
-        self.log.write(f"Saved {len(self._failures):,} failure(s) to {path}")
-
-    def _retry_failed(self) -> None:
-        """Re-queue the failed files from the last run (or a failures CSV)."""
-        retry = list(self._failed_paths)
-        if not retry:
-            # No in-memory failures (e.g. after reopening) - load from a CSV.
-            csv_path = filedialog.askopenfilename(
-                title="Open a failures CSV to retry",
-                initialdir=str(paths.reports_dir()),
-                filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
-            if not csv_path:
-                return
-            retry = self._read_failures_csv(Path(csv_path))
-        if not retry:
-            self.log.write("No failed files to retry.")
-            return
-        # Only keep files that still exist on disk.
-        existing = [p for p in retry if Path(p).exists()]
-        missing = len(retry) - len(existing)
-        self.files = list(dict.fromkeys(Path(p) for p in existing))
-        self._update_count()
-        msg = f"Queued {len(self.files):,} failed file(s) for retry."
-        if missing:
-            msg += f" ({missing:,} no longer on disk, skipped.)"
-        msg += " Review the destination and press Send."
-        self.log.write(msg)
-
-    @staticmethod
-    def _read_failures_csv(path: Path) -> list:
-        out = []
-        try:
-            with open(path, newline="", encoding="utf-8") as fh:
-                reader = csv.reader(fh)
-                next(reader, None)  # header
-                for row in reader:
-                    if row and row[0].strip():
-                        out.append(row[0].strip())
-        except OSError:
-            pass
-        return out
+        self.runner.run(total, "send", worker, on_done=on_done)
 
 
 class QueryMovePanel(ToolPanel):
@@ -791,8 +507,19 @@ class RetrievePanel(ToolPanel):
                                          width=560)
         self.results.grid(row=4, column=0, columnspan=4, sticky="ew",
                           padx=PAD, pady=PAD)
+
+        self.retr_progress = ctk.CTkProgressBar(self.body)
+        self.retr_progress.set(0)
+        self.retr_progress.grid(row=5, column=0, columnspan=4, sticky="ew",
+                                padx=PAD, pady=(PAD, 2))
+        self.retr_status = ctk.CTkLabel(
+            self.body, text="", anchor="w",
+            font=ctk.CTkFont(size=14, weight="bold"))
+        self.retr_status.grid(row=6, column=0, columnspan=4, sticky="w",
+                              padx=PAD)
         self._matches = []
         self.out_dir: Path | None = None
+        self._retr_state = {"n": 0, "remaining": 0, "last_ui": 0.0}
 
     def on_destinations_changed(self) -> None:
         self.picker.refresh()
@@ -862,19 +589,58 @@ class RetrievePanel(ToolPanel):
                                 StudyInstanceUID=str(ds.StudyInstanceUID))
         out = self.out_dir
         self.retrieve_btn.configure(state="disabled")
+        self.retr_progress.set(0)
+        self.retr_status.configure(text="Starting retrieve...")
         self.log.write(f"--- C-GET -> {out} ---")
         tls = self.app.tls_args_for(node)
+
+        def on_object(n, remaining):
+            # Called on the network thread; throttle UI updates to ~4/sec.
+            now = time.monotonic()
+            self._retr_state["n"] = n
+            self._retr_state["remaining"] = remaining
+            if now - self._retr_state["last_ui"] < 0.25:
+                return
+            self._retr_state["last_ui"] = now
+            total = n + remaining
+            frac = (n / total) if total else 0
+
+            def apply():
+                self.retr_progress.set(frac)
+                extra = f" of ~{total:,}" if total else ""
+                self.retr_status.configure(
+                    text=f"Received {n:,}{extra} object(s)...")
+            self.after(0, apply)
 
         def work():
             return scu.c_get(my_ae, node, ident, out, model="STUDY",
                              timeout=max(node.timeout, 120),
-                             progress=self.progress, tls_args=tls)
+                             progress=self.progress, tls_args=tls,
+                             on_object=on_object)
 
         def done(result):
+            self.retr_progress.set(1.0)
+            self.retr_status.configure(
+                text=f"Done. Saved {result.saved:,} object(s), "
+                     f"failed {result.failed}.")
             self.log.write(f"[DONE] {result.message}")
+            if result.saved_files:
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                rep = paths.reports_dir() / f"retrieve_{stamp}_files.csv"
+                try:
+                    with open(rep, "w", newline="", encoding="utf-8") as fh:
+                        w = csv.writer(fh)
+                        w.writerow(["saved_file"])
+                        for p in result.saved_files:
+                            w.writerow([p])
+                    self.log.write(f"Saved list of {len(result.saved_files):,} "
+                                   f"received file(s) to {rep}")
+                except OSError:
+                    pass
             self.retrieve_btn.configure(state="normal")
 
         def err(exc, tb):
+            self.retr_status.configure(text="Retrieve failed.")
             self.log.write(f"[ERROR] {exc}")
             self.retrieve_btn.configure(state="normal")
 

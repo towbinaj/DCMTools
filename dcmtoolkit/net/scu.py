@@ -360,29 +360,37 @@ class GetResult:
     warning: int = 0
     saved: int = 0
     message: str = ""
+    saved_files: list = field(default_factory=list)
 
 
 def c_get(my_aetitle: str, node: Node, identifier: Dataset, out_dir: Path,
           model: str = "STUDY", timeout: int = 300,
-          progress: Progress = _noop, tls_args=None) -> GetResult:
+          progress: Progress = _noop, tls_args=None,
+          on_object=None) -> GetResult:
     """Retrieve objects with C-GET, saving them locally over one association.
 
     Unlike C-MOVE, C-GET streams the objects back on the same connection, so no
     separate destination AE needs to be registered on the remote node.
+    ``on_object(count, total_remaining)`` is called after each object is saved.
     """
     result = GetResult()
     get_model = _GET_MODELS[model.upper()]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    saved = {"n": 0}
+    saved = {"n": 0, "remaining": 0}
 
     def handle_store(event):
         ds = event.dataset
         ds.file_meta = event.file_meta
         uid = getattr(ds, "SOPInstanceUID", None) or generate_uid()
-        (out_dir / f"{uid}.dcm").parent.mkdir(parents=True, exist_ok=True)
-        ds.save_as(str(out_dir / f"{uid}.dcm"), enforce_file_format=True)
+        dest = out_dir / f"{uid}.dcm"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        ds.save_as(str(dest), enforce_file_format=True)
         saved["n"] += 1
+        if len(result.saved_files) < 100000:
+            result.saved_files.append(str(dest))
+        if on_object:
+            on_object(saved["n"], saved["remaining"])
         return 0x0000
 
     ae = AE(ae_title=my_aetitle)
@@ -412,7 +420,8 @@ def c_get(my_aetitle: str, node: Node, identifier: Dataset, out_dir: Path,
                 result.failed = status.NumberOfFailedSuboperations or 0
             if "NumberOfWarningSuboperations" in status:
                 result.warning = status.NumberOfWarningSuboperations or 0
-            progress(f"Retrieved {saved['n']} object(s) so far...")
+            if "NumberOfRemainingSuboperations" in status:
+                saved["remaining"] = status.NumberOfRemainingSuboperations or 0
         result.saved = saved["n"]
         result.message = (f"Saved {result.saved} object(s) "
                           f"(completed {result.completed}, "
