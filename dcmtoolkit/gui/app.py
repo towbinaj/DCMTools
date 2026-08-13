@@ -18,6 +18,7 @@ from .panels_network import (EchoPanel, SendPanel, QueryMovePanel,
                              EchoAllPanel, RetrievePanel, StorageCommitPanel)
 from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
                            DeidentifyPanel)
+from .panels_edit import PatientEditPanel, StudyEditPanel, SeriesEditPanel
 from .panels_settings import SettingsPanel
 from .panels_logs import LogPanel
 from .theme import MUTED, apply_scale, tool_color
@@ -35,6 +36,7 @@ NAV_GROUPS = [
                  RetrievePanel, StorageCommitPanel]),
     ("Files", [TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
                DeidentifyPanel]),
+    ("Edit demographics", [PatientEditPanel, StudyEditPanel, SeriesEditPanel]),
 ]
 
 

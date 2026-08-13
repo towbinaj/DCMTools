@@ -9,6 +9,7 @@ import customtkinter as ctk
 
 from .. import config
 from ..tools import fileops
+from ..tools import dicomtags
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .batch import BatchRunner
@@ -175,8 +176,8 @@ class _DropSourceMixin:
 
 class ModifyPanel(_DropSourceMixin, ToolPanel):
     title = "Modify Header"
-    description = ("Set or remove tags across files. Tags as ggggeeee "
-                   "(e.g. 00100010).")
+    description = ("Batch tag editor: for each row pick a tag (or type a name / "
+                   "ggggeeee code), choose Set a value or Remove, then Apply.")
 
     def build(self) -> None:
         self.files: list[Path] = []
@@ -193,18 +194,43 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
         opsframe = ctk.CTkFrame(self.body)
         opsframe.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkLabel(opsframe, text="Action").grid(row=0, column=0, padx=PAD)
-        ctk.CTkLabel(opsframe, text="Tag (ggggeeee)").grid(row=0, column=1)
-        ctk.CTkLabel(opsframe, text="New value (for Set)").grid(row=0, column=2)
+        ctk.CTkLabel(opsframe, text="Tag (choose or type)").grid(row=0, column=1)
+        ctk.CTkLabel(opsframe, text="= resolved tag").grid(row=0, column=2)
+        ctk.CTkLabel(opsframe, text="New value (for Set)").grid(
+            row=0, column=3)
+        common = [""] + dicomtags.common_tag_labels()
         self.op_rows = []
         for i in range(4):
             action = ctk.CTkOptionMenu(opsframe, values=["set", "remove"],
                                        width=90)
-            action.grid(row=i + 1, column=0, padx=PAD, pady=2)
-            tag = ctk.CTkEntry(opsframe, width=120)
-            tag.grid(row=i + 1, column=1, padx=PAD, pady=2)
-            val = ctk.CTkEntry(opsframe, width=260)
-            val.grid(row=i + 1, column=2, padx=PAD, pady=2)
-            self.op_rows.append((action, tag, val))
+            action.grid(row=i + 1, column=0, padx=PAD, pady=3)
+            tag = ctk.CTkComboBox(opsframe, values=common, width=230,
+                                  command=lambda _v, r=i: self._resolve_row(r))
+            tag.set("")
+            tag.grid(row=i + 1, column=1, padx=PAD, pady=3)
+            name = ctk.CTkLabel(opsframe, text="", width=160, anchor="w",
+                                text_color=MUTED)
+            name.grid(row=i + 1, column=2, padx=PAD, pady=3, sticky="w")
+            val = ctk.CTkEntry(opsframe, width=240)
+            val.grid(row=i + 1, column=3, padx=PAD, pady=3)
+            try:
+                tag._entry.bind("<KeyRelease>",
+                                lambda _e, r=i: self._resolve_row(r))
+            except Exception:  # noqa: BLE001
+                pass
+            self.op_rows.append((action, tag, name, val))
+
+    def _resolve_row(self, i: int) -> None:
+        _action, tag, name, _val = self.op_rows[i]
+        t, kw = dicomtags.resolve_tag(tag.get())
+        if t is not None:
+            name.configure(text=f"= {kw or 'private'} "
+                                f"({t.group:04X},{t.element:04X})",
+                           text_color=MUTED)
+        elif tag.get().strip():
+            name.configure(text="unknown tag", text_color="#d9695f")
+        else:
+            name.configure(text="")
 
         self.in_place = ctk.CTkCheckBox(
             self.body, text="Overwrite files in place (else write to ./modified)")
@@ -230,11 +256,16 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             self.log.write("No files selected.")
             return
         ops = []
-        for action, tag, val in self.op_rows:
-            t = tag.get().strip()
-            if t:
-                ops.append(fileops.ModifyOp(tag=t, action=action.get(),
-                                            value=val.get()))
+        for action, tag, _name, val in self.op_rows:
+            raw = tag.get().strip()
+            if not raw:
+                continue
+            t, _kw = dicomtags.resolve_tag(raw)
+            if t is None:
+                self.log.write(f"Skipping unrecognized tag: {raw!r}")
+                continue
+            ops.append(fileops.ModifyOp(tag=dicomtags.to_hex(t),
+                                        action=action.get(), value=val.get()))
         if not ops:
             self.log.write("No operations defined.")
             return
