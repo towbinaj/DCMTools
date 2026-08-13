@@ -31,6 +31,9 @@ class QAPanel(_DropSourceMixin, ToolPanel):
     title = "QA / Consistency"
     description = ("Scan files for incongruent, abnormal, missing, or "
                   "duplicate tags.")
+    # Each load replaces the queue, so a new folder is scanned on its own
+    # (not piled together with the previously loaded one).
+    LOAD_REPLACES = True
 
     def build(self) -> None:
         self.files: list[Path] = []

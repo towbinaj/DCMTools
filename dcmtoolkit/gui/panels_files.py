@@ -89,17 +89,31 @@ class TagListPanel(ToolPanel):
 
 
 class _DropSourceMixin:
-    """Shared Add Files / Add Folder / drag-drop into ``self.files``."""
+    """Shared Add Files / Add Folder / drag-drop into ``self.files``.
+
+    Tools that accumulate many folders (send, modify, dump, ...) leave
+    ``LOAD_REPLACES`` False so each load *appends*. Single-record tools (the
+    demographic editors, the QA check) set it True so each load *replaces* the
+    queue - loading a new folder swaps out the previous one instead of piling
+    both together.
+    """
+
+    LOAD_REPLACES = False
 
     def _make_source(self, action_verb: str = "Run", extra_buttons=None):
-        specs = [("Add Files...", self._add_files, 110),
-                 ("Add Folder...", self._add_folder, 120),
+        verb = "Load" if self.LOAD_REPLACES else "Add"
+        specs = [(f"{verb} Files...", self._add_files, 120),
+                 (f"{verb} Folder...", self._add_folder, 130),
                  ("Clear", self._clear, 70)]
         if extra_buttons:
             specs += extra_buttons
         zone, self.count_lbl = build_drop_zone(
             self.app, self.body, self._on_drop, action_verb, specs)
         return zone
+
+    @property
+    def _verbed(self) -> str:
+        return "Loaded" if self.LOAD_REPLACES else "Added"
 
     def _clear(self):
         self.files = []
@@ -108,7 +122,10 @@ class _DropSourceMixin:
     def _add_files(self):
         chosen = filedialog.askopenfilenames(
             filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        self.files.extend(Path(p) for p in chosen)
+        picked = [Path(p) for p in chosen]
+        if not picked:
+            return
+        self.files = picked if self.LOAD_REPLACES else self.files + picked
         self._update_count()
 
     def _add_folder(self):
@@ -121,8 +138,9 @@ class _DropSourceMixin:
             return fileops.find_dicom_files(Path(folder))
 
         def done(found):
-            self.files.extend(found)
-            self.log.write(f"Added {len(found):,} file(s) from {folder}")
+            found = list(found)
+            self.files = found if self.LOAD_REPLACES else self.files + found
+            self.log.write(f"{self._verbed} {len(found):,} file(s) from {folder}")
             self._update_count()
 
         run_threaded(self, work, done)
@@ -130,10 +148,12 @@ class _DropSourceMixin:
     def _on_drop(self, dropped: list):
         chosen = [Path(p) for p in dropped]
         loose = [p for p in chosen if p.is_file()]
-        self.files.extend(loose)
-        if loose:
-            self.log.write(f"Added {len(loose):,} dropped file(s).")
         folders = [p for p in chosen if p.is_dir()]
+        # Start from an empty set (replace) or the current set (append).
+        base = [] if self.LOAD_REPLACES else list(self.files)
+        base.extend(loose)
+        if loose:
+            self.log.write(f"{self._verbed} {len(loose):,} dropped file(s).")
         if folders:
             self.count_lbl.configure(text="Scanning dropped folder(s)...")
 
@@ -141,13 +161,16 @@ class _DropSourceMixin:
                 return [(d, fileops.find_dicom_files(d)) for d in folders]
 
             def done(results):
+                acc = list(base)
                 for d, found in results:
-                    self.files.extend(found)
+                    acc.extend(found)
                     self.log.write(f"  + {d.name}:  {len(found):,} file(s)")
+                self.files = acc
                 self._update_count()
 
             run_threaded(self, work, done)
         else:
+            self.files = base
             self._update_count()
 
     def _update_count(self):

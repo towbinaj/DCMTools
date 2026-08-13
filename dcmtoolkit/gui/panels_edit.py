@@ -9,7 +9,6 @@ workers, live progress, per-folder report and retry).
 from __future__ import annotations
 
 from pathlib import Path
-from tkinter import filedialog
 
 import customtkinter as ctk
 from pydicom import dcmread
@@ -22,7 +21,7 @@ from .base import ToolPanel
 from .batch import BatchRunner
 from .panels_files import _DropSourceMixin, _folder_totals
 from .theme import MUTED
-from .widgets import build_drop_zone, run_threaded, PAD
+from .widgets import run_threaded, PAD
 
 # "Loaded" banner color (light, dark) - a calm green that reads on both themes.
 _LOADED_GREEN = ("#2e8b57", "#43c59e")
@@ -31,6 +30,8 @@ _LOADED_IDLE = "Nothing loaded — drag a study folder here, or use Load below."
 
 
 class _DemographicEditor(_DropSourceMixin, ToolPanel):
+    # An editor works on one record at a time - each load replaces the queue.
+    LOAD_REPLACES = True
     # Subclasses set these:
     FIELDS: list[tuple[str, str, str]] = []   # (keyword, label, VR)
     entity = "record"
@@ -52,6 +53,7 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
 
         self._make_source("Save").grid(row=0, column=0, sticky="ew",
                                        padx=PAD, pady=PAD)
+        self.count_lbl.configure(font=ctk.CTkFont(size=13, weight="bold"))
 
         self.status = ctk.CTkLabel(
             self.body, text=_LOADED_IDLE, anchor="w", justify="left",
@@ -97,66 +99,9 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
                                           padx=PAD, pady=(0, PAD))
 
     # -- loading ---------------------------------------------------------
-    # An editor works on ONE record at a time, so loading REPLACES the queue
-    # (the shared mixin appends). This is why the fields refresh to the newly
-    # loaded study instead of quietly keeping the previous one's values.
-    def _make_source(self, action_verb="Save", extra_buttons=None):
-        specs = [("Load Folder...", self._add_folder, 130),
-                 ("Load Files...", self._add_files, 120),
-                 ("Clear", self._clear, 70)]
-        zone, self.count_lbl = build_drop_zone(
-            self.app, self.body, self._on_drop, action_verb, specs)
-        self.count_lbl.configure(font=ctk.CTkFont(size=13, weight="bold"))
-        return zone
-
-    def _add_files(self):
-        chosen = filedialog.askopenfilenames(
-            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        if chosen:
-            self.files = [Path(p) for p in chosen]   # replace, not append
-            self._update_count()
-
-    def _add_folder(self):
-        folder = filedialog.askdirectory()
-        if not folder:
-            return
-        self.count_lbl.configure(text="Scanning folder...")
-
-        def work():
-            return fileops.find_dicom_files(Path(folder))
-
-        def done(found):
-            self.files = list(found)                 # replace, not append
-            self.log.write(f"Loaded {len(found):,} file(s) from {folder}")
-            self._update_count()
-
-        run_threaded(self, work, done)
-
-    def _on_drop(self, dropped: list):
-        chosen = [Path(p) for p in dropped]
-        loose = [p for p in chosen if p.is_file()]
-        folders = [p for p in chosen if p.is_dir()]
-        if folders:
-            self.count_lbl.configure(text="Scanning dropped folder(s)...")
-
-            def work():
-                out = list(loose)
-                for d in folders:
-                    out.extend(fileops.find_dicom_files(d))
-                return out
-
-            def done(found):
-                self.files = list(found)             # replace, not append
-                self.log.write(f"Loaded {len(found):,} file(s).")
-                self._update_count()
-
-            run_threaded(self, work, done)
-        else:
-            self.files = loose                       # replace, not append
-            if loose:
-                self.log.write(f"Loaded {len(loose):,} dropped file(s).")
-            self._update_count()
-
+    # An editor works on ONE record at a time, so each load REPLACES the queue
+    # (LOAD_REPLACES) - the fields refresh to the newly loaded study instead of
+    # quietly keeping the previous one's values.
     def _update_count(self):  # override: also (re)load demographics
         self.files = list(dict.fromkeys(self.files))
         self.count_lbl.configure(text=f"{len(self.files):,} file(s).")
