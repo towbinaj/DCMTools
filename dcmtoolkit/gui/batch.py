@@ -219,12 +219,26 @@ class BatchRunner:
         self.progress.set(frac)
         elapsed = now - start
         rate = i / elapsed if elapsed > 0 else 0
-        txt = (f"{i:,}/{total:,}  ({frac * 100:.1f}%)    {rate:.0f}/s    "
-               f"{self.verb} {ok:,}   failed {failed:,}    "
-               f"{self._fmt(elapsed)} elapsed")
-        if rate > 0 and not done:
-            txt += f"    ETA {self._fmt((total - i) / rate)}"
-        self.status_lbl.configure(text=txt)
+        if done:
+            # Announce completion clearly (green = clean, amber = issues), and
+            # do it here in the poller so a late tick can't revert it.
+            if self.cancelled:
+                head, col = "■ Cancelled", "#d9a441"
+            elif failed:
+                head, col = f"⚠ Complete — {failed:,} failed", "#d9a441"
+            else:
+                head, col = "✓ Complete", ("#2e8b57", "#43c59e")
+            self.status_lbl.configure(
+                text=f"{head} — {self.verb} {ok:,}, failed {failed:,}    "
+                     f"{self._fmt(elapsed)} elapsed", text_color=col)
+        else:
+            txt = (f"{i:,}/{total:,}  ({frac * 100:.1f}%)    {rate:.0f}/s    "
+                   f"{self.verb} {ok:,}   failed {failed:,}    "
+                   f"{self._fmt(elapsed)} elapsed")
+            if rate > 0:
+                txt += f"    ETA {self._fmt((total - i) / rate)}"
+            self.status_lbl.configure(text=txt,
+                                      text_color=("gray10", "gray90"))
 
         cur = f"{Path(folder).name}/{name}" if folder else name
         stale = now - last

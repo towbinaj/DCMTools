@@ -158,10 +158,21 @@ class QAPanel(_DropSourceMixin, ToolPanel):
             self._findings = result.findings
             self._scanned = True
             self._render()
-            self.status.configure(
-                text=f"Scanned {result.files_read:,} file(s) - "
-                     f"{len(result.findings):,} finding(s).",
-                text_color=("gray10", "gray90"))
+            n = len(result.findings)
+            if self._cancel:
+                self.status.configure(
+                    text=f"■ Scan cancelled — {result.files_read:,} file(s) "
+                         f"read, {n:,} finding(s) so far.",
+                    text_color="#d9a441")
+            elif n:
+                self.status.configure(
+                    text=f"✓ Scan complete — {result.files_read:,} file(s), "
+                         f"{n:,} finding(s).", text_color="#d9a441")
+            else:
+                self.status.configure(
+                    text=f"✓ Scan complete — {result.files_read:,} file(s), "
+                         "no issues found.",
+                    text_color=("#2e8b57", "#43c59e"))
             self.progress.set(1.0)
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
