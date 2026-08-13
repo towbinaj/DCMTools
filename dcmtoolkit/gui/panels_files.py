@@ -33,24 +33,46 @@ class TagListPanel(ToolPanel):
     description = "Inspect the DICOM header of a single file."
 
     def build(self) -> None:
-        bar = ctk.CTkFrame(self.body, fg_color="transparent")
+        bar = ctk.CTkFrame(self.body, border_width=2,
+                           border_color=("gray60", "gray45"), corner_radius=10)
         bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
         ctk.CTkButton(bar, text="Open DICOM file...",
-                      command=self._open).pack(side="left")
+                      command=self._open).pack(side="left", padx=6, pady=8)
+        self.drop_hint = ctk.CTkLabel(
+            bar, text="…or drag a DICOM file here", text_color=MUTED)
+        self.drop_hint.pack(side="left", padx=8)
         self.path_lbl = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.path_lbl.pack(side="left", padx=PAD)
+
+        def enter():
+            bar.configure(border_color="#4f9dde")
+
+        def leave():
+            bar.configure(border_color=("gray60", "gray45"))
+
+        if not self.app.enable_drop(bar, self._on_drop, enter, leave):
+            self.drop_hint.configure(text="")
+        else:
+            self.app.enable_drop(self.drop_hint, self._on_drop, enter, leave)
+
+    def _on_drop(self, dropped: list) -> None:
+        files = [Path(p) for p in dropped if Path(p).is_file()]
+        if files:
+            self._load(files[0])
 
     def _open(self) -> None:
         p = filedialog.askopenfilename(
             title="Select a DICOM file",
             filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        if not p:
-            return
-        self.path_lbl.configure(text=Path(p).name)
+        if p:
+            self._load(Path(p))
+
+    def _load(self, path: Path) -> None:
+        self.path_lbl.configure(text=path.name)
         self.log.clear()
 
         def work():
-            return fileops.list_tags(Path(p))
+            return fileops.list_tags(path)
 
         def done(rows):
             self.log.write(f"{'Tag':<24}{'VR':<4}{'Keyword':<28}Value")

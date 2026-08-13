@@ -22,6 +22,7 @@ from pynetdicom.presentation import (
     build_context,
 )
 from pynetdicom.sop_class import (
+    register_uid,
     PatientRootQueryRetrieveInformationModelFind,
     PatientRootQueryRetrieveInformationModelMove,
     PatientRootQueryRetrieveInformationModelGet,
@@ -110,6 +111,25 @@ def c_echo(my_aetitle: str, node: Node, timeout: int = 30,
 # ---------------------------------------------------------------------------
 # C-STORE
 # ---------------------------------------------------------------------------
+_STD_STORAGE = {str(cx.abstract_syntax) for cx in StoragePresentationContexts}
+_registered_private: set[str] = set()
+
+
+def _ensure_storage_registered(sop_uid: str) -> None:
+    """Register a private/unknown SOP Class UID as a Storage class so pynetdicom
+    will send it (it refuses UIDs it can't map to a service class)."""
+    s = str(sop_uid)
+    if s in _STD_STORAGE or s in _registered_private:
+        return
+    _registered_private.add(s)
+    try:
+        from pynetdicom.service_class import StorageServiceClass
+        register_uid(s, f"PrivateStorage{len(_registered_private)}",
+                     StorageServiceClass)
+    except Exception:  # noqa: BLE001 - already known / invalid keyword, ignore
+        pass
+
+
 def _contexts_for_files(files: list[Path], progress: Progress = _noop) -> list:
     """Build presentation contexts for the exact SOP classes + transfer syntaxes
     present in the files.
@@ -139,11 +159,25 @@ def _contexts_for_files(files: list[Path], progress: Progress = _noop) -> list:
             continue
         key = (str(sop), str(ts))
         if key not in contexts and len(contexts) < 128:
+            _ensure_storage_registered(sop)
             contexts[key] = build_context(sop, ts)
         if total > 3000 and i % 3000 == 0:
             progress(f"Preparing: scanned {i:,}/{total:,} files "
                      f"({len(contexts)} context(s))...")
-    return list(contexts.values())
+
+    # Exact per-file contexts come first (most important). Then top up with
+    # standard storage contexts so the association can still be negotiated even
+    # when a file uses a private/unsupported SOP class - some archives reject
+    # the whole association if the only proposed context is one they don't know.
+    ctxs = list(contexts.values())
+    covered = {str(k[0]) for k in contexts}
+    for cx in StoragePresentationContexts:
+        if len(ctxs) >= 128:
+            break
+        if str(cx.abstract_syntax) not in covered:
+            ctxs.append(cx)
+            covered.add(str(cx.abstract_syntax))
+    return ctxs
 
 
 OnFile = Callable[[int, int, Path, bool, str], None]
