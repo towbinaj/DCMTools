@@ -110,52 +110,40 @@ def c_echo(my_aetitle: str, node: Node, timeout: int = 30,
 # ---------------------------------------------------------------------------
 # C-STORE
 # ---------------------------------------------------------------------------
-def _contexts_for_files(files: list[Path]) -> list:
-    """Build the minimal set of presentation contexts for the given files."""
+def _contexts_for_files(files: list[Path], progress: Progress = _noop) -> list:
+    """Build presentation contexts for the exact SOP classes + transfer syntaxes
+    present in the files.
+
+    Proposing precisely what the files contain guarantees the peer can negotiate
+    a matching context (unlike a fixed "all storage" list, which some archives
+    only partially accept). Capped at the 128-context association limit.
+    """
+    from pydicom.uid import ExplicitVRLittleEndian
     contexts: dict[tuple[str, str], object] = {}
-    for f in files:
+    total = len(files)
+    for i, f in enumerate(files, 1):
+        sop = ts = None
         try:
             ds = dcmread(str(f), stop_before_pixels=True, force=True)
-            sop = ds.file_meta.MediaStorageSOPClassUID
-            ts = ds.file_meta.TransferSyntaxUID
-        except Exception:  # noqa: BLE001 - unreadable file handled at send time
+            fm = getattr(ds, "file_meta", None)
+            if fm is not None:
+                sop = getattr(fm, "MediaStorageSOPClassUID", None)
+                ts = getattr(fm, "TransferSyntaxUID", None)
+            if not sop:
+                sop = getattr(ds, "SOPClassUID", None)
+            if not ts:
+                ts = ExplicitVRLittleEndian
+        except Exception:  # noqa: BLE001 - unreadable handled at send time
+            continue
+        if not sop:
             continue
         key = (str(sop), str(ts))
-        if key not in contexts:
+        if key not in contexts and len(contexts) < 128:
             contexts[key] = build_context(sop, ts)
+        if total > 3000 and i % 3000 == 0:
+            progress(f"Preparing: scanned {i:,}/{total:,} files "
+                     f"({len(contexts)} context(s))...")
     return list(contexts.values())
-
-
-def _bulk_transfer_syntaxes() -> list[str]:
-    """Common transfer syntaxes to propose for bulk sends (uncompressed +
-    the widely-used compressed ones). Resolved by name for version safety."""
-    from pydicom import uid as _u
-    names = [
-        "ImplicitVRLittleEndian", "ExplicitVRLittleEndian",
-        "DeflatedExplicitVRLittleEndian", "ExplicitVRBigEndian",
-        "JPEGBaseline8Bit", "JPEGExtended12Bit", "JPEGLosslessP14",
-        "JPEGLossless", "JPEGLosslessSV1", "JPEGLSLossless",
-        "JPEGLSNearLossless", "JPEG2000Lossless", "JPEG2000", "RLELossless",
-    ]
-    out: list[str] = []
-    for n in names:
-        v = getattr(_u, n, None)
-        if v and str(v) not in out:
-            out.append(str(v))
-    return out
-
-
-def _bulk_contexts() -> list:
-    """Propose all standard storage SOP classes with common transfer syntaxes.
-
-    Avoids pre-reading every file (which stalls large sends) and still covers
-    virtually all real-world objects. A single association allows at most 128
-    presentation contexts, so we cap there.
-    """
-    ts = _bulk_transfer_syntaxes()
-    ctxs = [build_context(cx.abstract_syntax, ts)
-            for cx in StoragePresentationContexts]
-    return ctxs[:128]
 
 
 OnFile = Callable[[int, int, Path, bool, str], None]
@@ -180,20 +168,41 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
         result.errors.append("No files selected.")
         return result
 
+    progress(f"Preparing to send {total:,} file(s)...")
+    contexts = _contexts_for_files(files, progress)
+    if not contexts:
+        msg = "No readable DICOM presentation contexts in the selection."
+        result.errors.append(msg)
+        for i, f in enumerate(files, 1):
+            if on_file:
+                on_file(i, total, f, False, "not DICOM")
+        result.failed = total
+        return result
+
     ae = AE(ae_title=my_aetitle)
-    ae.requested_contexts = _bulk_contexts()
+    ae.requested_contexts = contexts
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 
     scheme = "TLS " if tls_args else ""
-    progress(f"Associating ({scheme}) with {node.aetitle}@{node.host}:"
-             f"{node.port} ...")
+    progress(f"Proposing {len(contexts)} context(s). Associating ({scheme})"
+             f" with {node.aetitle}@{node.host}:{node.port} ...")
     assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
                          tls_args=tls_args)
     if not assoc.is_established:
         result.errors.append("Association rejected / aborted / failed.")
         result.failed = total
+        progress("Association rejected - the peer refused the connection or "
+                 "the proposed presentation contexts.")
+        for i, f in enumerate(files, 1):
+            if on_file:
+                on_file(i, total, f, False, "association rejected")
         return result
-    progress(f"Association established. Sending {total:,} file(s)...")
+    # Warn if the peer accepted the association but no storage contexts.
+    if not assoc.accepted_contexts:
+        progress("Warning: peer accepted the association but NO presentation "
+                 "contexts - all sends will fail.")
+    progress(f"Association established ({len(assoc.accepted_contexts)} "
+             f"accepted context(s)). Sending {total:,} file(s)...")
 
     def record(i, f, ok, code):
         if on_file:
@@ -230,7 +239,7 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
                     if len(result.errors) < 5000:
                         result.errors.append(f"{f}: C-STORE {code}")
             except Exception as exc:  # noqa: BLE001 - never let one file abort
-                code = "error"
+                code = str(exc).strip().replace("\n", " ")[:200] or "error"
                 result.failed += 1
                 if len(result.errors) < 5000:
                     result.errors.append(f"{f}: {exc}")
