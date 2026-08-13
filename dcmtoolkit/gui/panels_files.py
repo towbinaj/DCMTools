@@ -93,12 +93,17 @@ class _DropSourceMixin:
 
     def _make_source(self, action_verb: str = "Run", extra_buttons=None):
         specs = [("Add Files...", self._add_files, 110),
-                 ("Add Folder...", self._add_folder, 120)]
+                 ("Add Folder...", self._add_folder, 120),
+                 ("Clear", self._clear, 70)]
         if extra_buttons:
             specs += extra_buttons
         zone, self.count_lbl = build_drop_zone(
             self.app, self.body, self._on_drop, action_verb, specs)
         return zone
+
+    def _clear(self):
+        self.files = []
+        self._update_count()
 
     def _add_files(self):
         chosen = filedialog.askopenfilenames(

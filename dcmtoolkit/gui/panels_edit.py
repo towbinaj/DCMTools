@@ -93,6 +93,16 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
         self.count_lbl.configure(text=f"{len(self.files):,} file(s).")
         self._load_demographics()
 
+    def _clear(self):
+        self.files = []
+        self._orig = {}
+        for _kw, _label, _vr, entry, vlabel in self._field_widgets:
+            entry.delete(0, "end")
+            vlabel.configure(text="")
+        self.status.configure(text="Add a folder or files to load.",
+                              text_color=MUTED)
+        self.count_lbl.configure(text="No files.")
+
     def _load_demographics(self):
         if not self.files:
             return
