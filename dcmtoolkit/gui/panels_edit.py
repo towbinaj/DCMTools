@@ -110,6 +110,7 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
     def _clear(self):
         self.files = []
         self._orig = {}
+        self.log.clear()
         for _kw, _label, _vr, entry, vlabel in self._field_widgets:
             entry.delete(0, "end")
             vlabel.configure(text="")

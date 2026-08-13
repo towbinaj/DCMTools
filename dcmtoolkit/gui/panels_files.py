@@ -115,8 +115,16 @@ class _DropSourceMixin:
     def _verbed(self) -> str:
         return "Loaded" if self.LOAD_REPLACES else "Added"
 
+    def _begin_load(self):
+        # Replace-mode tools show one record at a time, so start the log fresh
+        # on each load - otherwise the bottom log keeps stale folder lines from
+        # the previously loaded study.
+        if self.LOAD_REPLACES:
+            self.log.clear()
+
     def _clear(self):
         self.files = []
+        self.log.clear()
         self._update_count()
 
     def _add_files(self):
@@ -125,6 +133,7 @@ class _DropSourceMixin:
         picked = [Path(p) for p in chosen]
         if not picked:
             return
+        self._begin_load()
         self.files = picked if self.LOAD_REPLACES else self.files + picked
         self._update_count()
 
@@ -132,6 +141,7 @@ class _DropSourceMixin:
         folder = filedialog.askdirectory()
         if not folder:
             return
+        self._begin_load()
         self.count_lbl.configure(text="Scanning folder...")
 
         def work():
@@ -149,6 +159,7 @@ class _DropSourceMixin:
         chosen = [Path(p) for p in dropped]
         loose = [p for p in chosen if p.is_file()]
         folders = [p for p in chosen if p.is_dir()]
+        self._begin_load()
         # Start from an empty set (replace) or the current set (append).
         base = [] if self.LOAD_REPLACES else list(self.files)
         base.extend(loose)

@@ -110,6 +110,7 @@ class QAPanel(_DropSourceMixin, ToolPanel):
         self.files = []
         self._findings = []
         self._scanned = False
+        self.log.clear()
         for w in self.results.winfo_children():
             w.destroy()
         self.summary.configure(text="")
@@ -144,6 +145,8 @@ class QAPanel(_DropSourceMixin, ToolPanel):
         self._scan = {"i": 0, "total": total}
         self.status.configure(text=f"Scanning 0/{total:,} ...",
                               text_color=("gray10", "gray90"))
+        self.log.write(f"--- Scanning {total:,} file(s) with {workers} "
+                       f"worker(s) ---")
 
         def on_item(i, tot, f, ok, detail):
             with self._lock:
@@ -178,6 +181,15 @@ class QAPanel(_DropSourceMixin, ToolPanel):
             self.cancel_btn.configure(state="disabled")
             self.export_btn.configure(
                 state="normal" if result.findings else "disabled")
+            # Mirror the outcome into the bottom log so it updates too.
+            from collections import Counter
+            counts = Counter(f.category for f in result.findings)
+            verb = "cancelled after" if self._cancel else "complete —"
+            self.log.write(f"[DONE] Scan {verb} {result.files_read:,} "
+                           f"file(s) read, {n:,} finding(s).")
+            if n:
+                self.log.write("   " + "   ".join(
+                    f"{c}: {counts[c]}" for c in _CATEGORIES[1:] if counts[c]))
 
         def err(exc, tb):
             self.log.write(f"[ERROR] {exc}")
