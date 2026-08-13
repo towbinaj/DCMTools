@@ -100,21 +100,21 @@ class _DropSourceMixin:
 
     def _on_drop(self, dropped: list):
         chosen = [Path(p) for p in dropped]
-        self.files.extend(p for p in chosen if p.is_file())
+        loose = [p for p in chosen if p.is_file()]
+        self.files.extend(loose)
+        if loose:
+            self.log.write(f"Added {len(loose):,} dropped file(s).")
         folders = [p for p in chosen if p.is_dir()]
         if folders:
             self.count_lbl.configure(text="Scanning dropped folder(s)...")
 
             def work():
-                out = []
-                for d in folders:
-                    out.extend(fileops.find_dicom_files(d))
-                return out
+                return [(d, fileops.find_dicom_files(d)) for d in folders]
 
-            def done(found):
-                self.files.extend(found)
-                self.log.write(f"Added {len(found):,} file(s) from "
-                               f"{len(folders)} dropped folder(s).")
+            def done(results):
+                for d, found in results:
+                    self.files.extend(found)
+                    self.log.write(f"  + {d.name}:  {len(found):,} file(s)")
                 self._update_count()
 
             run_threaded(self, work, done)
@@ -464,22 +464,22 @@ class DeidentifyPanel(ToolPanel):
 
     def _on_drop(self, dropped: list):
         chosen = [Path(p) for p in dropped]
-        self.files.extend(p for p in chosen if p.is_file())
+        loose = [p for p in chosen if p.is_file()]
+        self.files.extend(loose)
+        if loose:
+            self.log.write(f"Added {len(loose):,} dropped file(s).")
         folders = [p for p in chosen if p.is_dir()]
         if folders:
             self.base_dir = folders[0]
             self.count_lbl.configure(text="Scanning dropped folder(s)...")
 
             def work():
-                out = []
-                for d in folders:
-                    out.extend(fileops.find_dicom_files(d))
-                return out
+                return [(d, fileops.find_dicom_files(d)) for d in folders]
 
-            def done(found):
-                self.files.extend(found)
-                self.log.write(f"Added {len(found):,} file(s) from "
-                               f"{len(folders)} dropped folder(s).")
+            def done(results):
+                for d, found in results:
+                    self.files.extend(found)
+                    self.log.write(f"  + {d.name}:  {len(found):,} file(s)")
                 self._update_count()
 
             run_threaded(self, work, done)
