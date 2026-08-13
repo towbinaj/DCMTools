@@ -108,9 +108,11 @@ class App(*_APP_BASES):
             text_color=MUTED, font=ctk.CTkFont(size=11))
         self.ae_status.pack(side="right", padx=8)
 
-        # Show first panel
+        # Restore the last-used tool, else show the first panel.
+        self._current = ""
         if self._buttons:
-            self.select(next(iter(self.panels)))
+            last = self.settings.last_tool
+            self.select(last if last in self.panels else next(iter(self.panels)))
 
     def _build_nav(self) -> None:
         groups = list(NAV_GROUPS)
@@ -148,6 +150,7 @@ class App(*_APP_BASES):
                 self._buttons[key] = btn
 
     def select(self, key: str) -> None:
+        self._current = key
         for k, panel in self.panels.items():
             if k == key:
                 panel.grid()
@@ -173,6 +176,7 @@ class App(*_APP_BASES):
         # Remember the window size/position for next launch.
         try:
             self.settings.window_geometry = self.geometry()
+            self.settings.last_tool = getattr(self, "_current", "")
             config.save_settings(self.settings)
         except Exception:  # noqa: BLE001
             pass
