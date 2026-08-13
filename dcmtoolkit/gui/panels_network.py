@@ -12,7 +12,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 from pydicom import dcmread
 
-from .. import paths
+from .. import config, paths
 from ..net import scu
 from ..tools.fileops import find_dicom_files
 from .base import ToolPanel
@@ -207,6 +207,11 @@ class SendPanel(ToolPanel):
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
+        ctk.CTkLabel(runbar, text="Parallel").pack(side="left", padx=(PAD, 4))
+        self.workers = ctk.CTkOptionMenu(
+            runbar, values=["1", "2", "4", "6", "8"], width=64)
+        self.workers.set(str(self.app.settings.send_workers))
+        self.workers.pack(side="left")
 
         self.runner = BatchRunner(self, verb="sent")
         self.runner.build(self.body).grid(row=5, column=0, sticky="nsew",
@@ -243,21 +248,22 @@ class SendPanel(ToolPanel):
 
     def _on_drop(self, dropped: list) -> None:
         chosen = [Path(p) for p in dropped]
-        self.files.extend(p for p in chosen if p.is_file())
+        loose = [p for p in chosen if p.is_file()]
+        self.files.extend(loose)
         folders = [p for p in chosen if p.is_dir()]
+        if loose:
+            self.log.write(f"Added {len(loose):,} dropped file(s).")
         if folders:
             self.count_lbl.configure(text="Scanning dropped folder(s)...")
 
             def work():
-                out = []
-                for d in folders:
-                    out.extend(find_dicom_files(d))
-                return out
+                # Return per-folder file lists so we can report each one.
+                return [(d, find_dicom_files(d)) for d in folders]
 
-            def done(found):
-                self.files.extend(found)
-                self.log.write(f"Added {len(found):,} file(s) from "
-                               f"{len(folders)} dropped folder(s).")
+            def done(results):
+                for d, found in results:
+                    self.files.extend(found)
+                    self.log.write(f"  + {d.name}:  {len(found):,} file(s)")
                 self._update_count()
 
             run_threaded(self, work, done)
@@ -290,19 +296,35 @@ class SendPanel(ToolPanel):
         files = list(self.files)
         total = len(files)
         tls = self.app.tls_args_for(node)
-        self.log.write(f"--- Sending {total:,} file(s) to {node.name} ---")
+        try:
+            workers = int(self.workers.get())
+        except ValueError:
+            workers = 4
+        # Persist the chosen parallelism.
+        if self.app.settings.send_workers != workers:
+            self.app.settings.send_workers = workers
+            config.save_settings(self.app.settings)
+        # Per-folder totals so folder completion is accurate with parallel sends.
+        folder_totals = {}
+        for f in files:
+            k = str(f.parent)
+            folder_totals[k] = folder_totals.get(k, 0) + 1
+        self.log.write(f"--- Sending {total:,} file(s) in "
+                       f"{len(folder_totals)} folder(s) to {node.name} "
+                       f"using {workers} parallel association(s) ---")
 
         def worker():
             return scu.c_store(my_ae, node, files, progress=self.progress,
                                should_cancel=lambda: self.runner.cancelled,
                                timeout=node.timeout, tls_args=tls,
-                               on_file=self.runner.on_item)
+                               on_file=self.runner.on_item, workers=workers)
 
         def on_done():
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
 
-        self.runner.run(total, "send", worker, on_done=on_done)
+        self.runner.run(total, "send", worker, on_done=on_done,
+                        folder_totals=folder_totals)
 
 
 class QueryMovePanel(ToolPanel):

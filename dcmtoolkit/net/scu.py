@@ -154,7 +154,8 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
             should_cancel: Callable[[], bool] | None = None,
             on_frac: Callable[[float], None] | None = None,
             timeout: int = 30, tls_args=None,
-            on_file: OnFile | None = None, verbose: bool = False) -> StoreResult:
+            on_file: OnFile | None = None, verbose: bool = False,
+            workers: int = 1) -> StoreResult:
     """Send DICOM files via C-STORE over one association.
 
     ``on_file(index, total, path, ok, code)`` is invoked once per file with
@@ -179,81 +180,111 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
         result.failed = total
         return result
 
-    ae = AE(ae_title=my_aetitle)
-    ae.requested_contexts = contexts
-    ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
+    import threading
+    from queue import Queue, Empty
 
+    workers = max(1, min(int(workers), 16))
     scheme = "TLS " if tls_args else ""
-    progress(f"Proposing {len(contexts)} context(s). Associating ({scheme})"
-             f" with {node.aetitle}@{node.host}:{node.port} ...")
-    assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
-                         tls_args=tls_args)
-    if not assoc.is_established:
-        result.errors.append("Association rejected / aborted / failed.")
-        result.failed = total
-        progress("Association rejected - the peer refused the connection or "
-                 "the proposed presentation contexts.")
-        for i, f in enumerate(files, 1):
-            if on_file:
-                on_file(i, total, f, False, "association rejected")
-        return result
-    # Warn if the peer accepted the association but no storage contexts.
-    if not assoc.accepted_contexts:
-        progress("Warning: peer accepted the association but NO presentation "
-                 "contexts - all sends will fail.")
-    progress(f"Association established ({len(assoc.accepted_contexts)} "
-             f"accepted context(s)). Sending {total:,} file(s)...")
+    progress(f"Proposing {len(contexts)} context(s). Sending {total:,} "
+             f"file(s) over {workers} parallel association(s) to "
+             f"{node.aetitle}@{node.host}:{node.port} ...")
 
-    def record(i, f, ok, code):
-        if on_file:
-            on_file(i, total, f, ok, code)
+    work_q: "Queue" = Queue()
+    for f in files:
+        work_q.put(f)
 
-    try:
-        for i, f in enumerate(files, 1):
-            if should_cancel is not None and should_cancel():
-                progress(f"Cancelled after {i - 1} of {total:,} file(s).")
-                break
+    rlock = threading.Lock()
+    counter = {"n": 0}
+    established = {"n": 0}
 
-            if not assoc.is_established:
-                result.errors.append("Association was lost mid-transfer.")
-                progress("Association lost - stopping.")
-                result.failed += (total - i + 1)
-                break
-
-            ok, code = False, "error"
-            try:
-                ds = dcmread(str(f), force=True)
-                if "SOPClassUID" not in ds or "SOPInstanceUID" not in ds:
-                    raise ValueError("not a DICOM object (missing SOP UID)")
-                status = assoc.send_c_store(ds)
-                if status and status.Status == 0x0000:
-                    ok, code = True, "0x0000"
-                    result.sent += 1
-                elif status and status.Status in (0xB000, 0xB006, 0xB007):
-                    ok, code = True, f"0x{status.Status:04x}"
-                    result.sent += 1
-                    result.warnings += 1
-                else:
-                    code = f"0x{status.Status:04x}" if status else "no-response"
-                    result.failed += 1
-                    if len(result.errors) < 5000:
-                        result.errors.append(f"{f}: C-STORE {code}")
-            except Exception as exc:  # noqa: BLE001 - never let one file abort
-                code = str(exc).strip().replace("\n", " ")[:200] or "error"
+    def bump(ok, f, code):
+        with rlock:
+            if ok:
+                result.sent += 1
+            else:
                 result.failed += 1
                 if len(result.errors) < 5000:
-                    result.errors.append(f"{f}: {exc}")
+                    result.errors.append(f"{f}: {code}")
+            counter["n"] += 1
+            n = counter["n"]
+        if on_file:
+            on_file(n, total, f, ok, code)
+        if on_frac:
+            on_frac(n / total)
 
-            record(i, f, ok, code)
-            if verbose:
-                tag = "Sent" if ok else "FAILED"
-                progress(f"[{i}/{total}] {tag} {f.name} ({code})")
-            if on_frac:
-                on_frac(i / total)
-    finally:
-        assoc.release()
+    def send_one(assoc, f):
+        ok, code = False, "error"
+        try:
+            ds = dcmread(str(f), force=True)
+            if "SOPClassUID" not in ds or "SOPInstanceUID" not in ds:
+                raise ValueError("not a DICOM object (missing SOP UID)")
+            status = assoc.send_c_store(ds)
+            if status and status.Status == 0x0000:
+                ok, code = True, "0x0000"
+            elif status and status.Status in (0xB000, 0xB006, 0xB007):
+                ok, code = True, f"0x{status.Status:04x}"
+                with rlock:
+                    result.warnings += 1
+            else:
+                code = f"0x{status.Status:04x}" if status else "no-response"
+        except Exception as exc:  # noqa: BLE001 - never let one file abort
+            code = str(exc).strip().replace("\n", " ")[:200] or "error"
+        bump(ok, f, code)
 
-    progress(f"Done. Sent {result.sent:,}, failed {result.failed:,}.")
+    def worker():
+        ae = AE(ae_title=my_aetitle)
+        ae.requested_contexts = contexts
+        ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
+        assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
+                             tls_args=tls_args)
+        if not assoc.is_established:
+            return
+        with rlock:
+            established["n"] += 1
+        try:
+            while True:
+                if should_cancel is not None and should_cancel():
+                    break
+                if not assoc.is_established:
+                    break
+                try:
+                    f = work_q.get_nowait()
+                except Empty:
+                    break
+                send_one(assoc, f)
+        finally:
+            assoc.release()
+
+    threads = [threading.Thread(target=worker, daemon=True)
+               for _ in range(workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Anything still queued: no association could be made, lost, or cancelled.
+    leftover = []
+    while True:
+        try:
+            leftover.append(work_q.get_nowait())
+        except Empty:
+            break
+    cancelled = should_cancel is not None and should_cancel()
+    if leftover and not cancelled:
+        if established["n"] == 0:
+            progress("Association rejected - the peer refused the connection "
+                     "or the proposed presentation contexts.")
+            reason = "association rejected"
+        else:
+            progress("Association lost during transfer.")
+            reason = "association lost"
+        for f in leftover:
+            bump(False, f, reason)
+    elif leftover and cancelled:
+        progress(f"Cancelled. {len(leftover):,} file(s) not sent.")
+
+    progress(f"Done. Sent {result.sent:,}, failed {result.failed:,} "
+             f"(over {established['n']} association(s)).")
     return result
 
 

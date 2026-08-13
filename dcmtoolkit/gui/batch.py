@@ -56,6 +56,7 @@ class BatchRunner:
         self._errors: list[str] = []
         self._vbuf: list[str] = []
         self._logged_folders: set = set()
+        self._folder_totals: dict = {}
         self._report_fh = None
         self._report_writer = None
         self.report_path = None
@@ -109,12 +110,14 @@ class BatchRunner:
     def failed_paths(self) -> list[Path]:
         return list(self._failed_paths)
 
-    def run(self, total: int, report_prefix: str, worker, on_done=None) -> None:
+    def run(self, total: int, report_prefix: str, worker, on_done=None,
+            folder_totals=None) -> None:
         self.cancelled = False
         self._failed_paths = []
         self._errors = []
         self._vbuf = []
         self._logged_folders = set()
+        self._folder_totals = dict(folder_totals or {})
         self._on_done = on_done
         self.progress.set(0)
         for w in self.results.winfo_children():
@@ -232,7 +235,16 @@ class BatchRunner:
             text_color="#d9a441" if (not done and stale > 8) else MUTED)
         self.detail_lbl.configure(text=detail)
 
-        finished = order if done else order[:-1]
+        # A folder is finished when all its expected files are processed
+        # (works with parallel workers); fall back to the sequential heuristic
+        # when totals aren't known.
+        if self._folder_totals:
+            finished = [fo for fo in order
+                        if (folders[fo][0] + folders[fo][1])
+                        >= self._folder_totals.get(fo, 1 << 62)]
+        else:
+            finished = order if done else order[:-1]
+
         for fo in finished:
             if fo not in self._logged_folders:
                 self._logged_folders.add(fo)
@@ -249,10 +261,12 @@ class BatchRunner:
         done_ct = len(finished)
         clean = sum(1 for fo in finished if folders[fo][1] == 0)
         bad = [fo for fo in order if folders[fo][1] > 0]
+        total_folders = (len(self._folder_totals) if self._folder_totals
+                         else len(order))
         self.summary_lbl.configure(
-            text=f"Folders — done: {done_ct}   clean: {clean}   "
-                 f"with failures: {len(bad)}   in progress: "
-                 f"{len(order) - done_ct}")
+            text=f"Folders — {done_ct}/{total_folders} done   "
+                 f"clean: {clean}   with failures: {len(bad)}   "
+                 f"remaining: {max(total_folders - done_ct, 0)}")
         for fo in bad:
             oc, fcnt = folders[fo]
             self._upsert_row(fo, oc, fcnt)

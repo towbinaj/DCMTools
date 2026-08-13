@@ -19,6 +19,14 @@ def _split(text: str) -> list[str]:
     return [p.strip() for p in text.split("|") if p.strip()]
 
 
+def _folder_totals(files) -> dict:
+    totals: dict = {}
+    for f in files:
+        k = str(Path(f).parent)
+        totals[k] = totals.get(k, 0) + 1
+    return totals
+
+
 class TagListPanel(ToolPanel):
     title = "Tag Lister"
     description = "Inspect the DICOM header of a single file."
@@ -206,7 +214,8 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
 
-        self.runner.run(total, "modify", worker, on_done=on_done)
+        self.runner.run(total, "modify", worker, on_done=on_done,
+                        folder_totals=_folder_totals(files))
 
 
 class SplitPanel(_DropSourceMixin, ToolPanel):
@@ -275,7 +284,8 @@ class SplitPanel(_DropSourceMixin, ToolPanel):
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
 
-        self.runner.run(total, "split", worker, on_done=on_done)
+        self.runner.run(total, "split", worker, on_done=on_done,
+                        folder_totals=_folder_totals(files))
 
 
 class DumpPanel(_DropSourceMixin, ToolPanel):
@@ -338,7 +348,8 @@ class DumpPanel(_DropSourceMixin, ToolPanel):
                     fileops.write_dump_csv(res, Path(out))
                     self.log.write(f"Saved {len(res.rows):,} rows to {out}")
 
-        self.runner.run(total, "dump", worker, on_done=on_done)
+        self.runner.run(total, "dump", worker, on_done=on_done,
+                        folder_totals=_folder_totals(files))
 
 
 class DeidentifyPanel(ToolPanel):
@@ -541,4 +552,5 @@ class DeidentifyPanel(ToolPanel):
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
 
-        self.runner.run(total, "deident", worker, on_done=on_done)
+        self.runner.run(total, "deident", worker, on_done=on_done,
+                        folder_totals=_folder_totals(files))
