@@ -40,22 +40,22 @@ class ModalitySCUPanel(ToolPanel):
         self.body.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(0, weight=1)
 
-        # The workflow is two phases, so split it into tabs - this gives the
-        # worklist results (and the exam/progress area) the full panel height.
+        # Three-step workflow, one tab per step, so each gets the full height.
         self.tabs = ctk.CTkTabview(self.body)
         self.tabs.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
-        wl = self.tabs.add("1. Worklist")
-        ex = self.tabs.add("2. Perform exam")
+        t1 = self.tabs.add("1 · Worklist")
+        t2 = self.tabs.add("2 · Exam images")
+        t3 = self.tabs.add("3 · Perform")
 
-        # ===== Tab 1: worklist query + results =====
-        wl.grid_columnconfigure(0, weight=1)
-        wl.grid_rowconfigure(2, weight=1)     # results expand
-        self.ris = DestinationPicker(wl, self.app, label="Worklist / MPPS server",
+        # ===== Step 1: query worklist + pick a scheduled step =====
+        t1.grid_columnconfigure(0, weight=1)
+        t1.grid_rowconfigure(2, weight=1)     # results expand
+        self.ris = DestinationPicker(t1, self.app, label="Worklist / MPPS server",
                                      remember_key="ModalityRIS",
                                      groups=[DEST_GROUP_WORKLIST])
         self.ris.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
 
-        q = ctk.CTkFrame(wl)
+        q = ctk.CTkFrame(t1)
         q.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
         for c in range(6):
             q.grid_columnconfigure(c, weight=1 if c in (1, 3, 5) else 0)
@@ -87,34 +87,42 @@ class ModalitySCUPanel(ToolPanel):
         self.query_status.pack(side="left", padx=PAD)
 
         self.results = ctk.CTkScrollableFrame(
-            wl, label_text="Scheduled procedure steps (pick one, then open "
-                            "'2. Perform exam')")
+            t1, label_text="Scheduled procedure steps (pick one, then open "
+                            "'2 · Exam images')")
         self.results.grid(row=2, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
         self.results.grid_columnconfigure(0, weight=1)
         self._sel = ctk.IntVar(value=-1)
 
-        # ===== Tab 2: perform the exam =====
-        ex.grid_columnconfigure(0, weight=1)
-        ex.grid_rowconfigure(5, weight=1)     # runner expands
-        self.sel_banner = ctk.CTkLabel(
-            ex, text="No worklist item selected - pick one on the Worklist tab.",
-            anchor="w", justify="left", text_color=MUTED,
-            font=ctk.CTkFont(size=14, weight="bold"))
-        self.sel_banner.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 2))
-
-        self.pacs = DestinationPicker(ex, self.app, label="Send images to (PACS)",
+        # ===== Step 2: load the images acquired for this exam =====
+        t2.grid_columnconfigure(0, weight=1)
+        t2.grid_rowconfigure(2, weight=1)
+        self.pacs = DestinationPicker(t2, self.app, label="Send images to (PACS)",
                                       remember_key="ModalityPACS")
-        self.pacs.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
-
+        self.pacs.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
+        ctk.CTkLabel(t2, text="Load the images acquired for the selected exam:",
+                     anchor="w", text_color=MUTED).grid(
+            row=1, column=0, sticky="w", padx=PAD, pady=(PAD, 2))
         zone, self.count_lbl = build_drop_zone(
-            self.app, ex, self._on_drop, "Perform exam",
+            self.app, t2, self._on_drop, "go to '3 · Perform'",
             [("Load Folder...", self._load_folder, 130),
              ("Load Files...", self._load_files, 120),
              ("Clear", self._clear_files, 70)])
-        zone.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
+        zone.grid(row=2, column=0, sticky="new", padx=PAD, pady=(0, PAD))
 
-        opt = ctk.CTkFrame(ex, fg_color="transparent")
-        opt.grid(row=3, column=0, sticky="ew", padx=PAD)
+        # ===== Step 3: perform (MPPS -> store -> MPPS) =====
+        t3.grid_columnconfigure(0, weight=1)
+        t3.grid_rowconfigure(4, weight=1)     # runner expands
+        self.sel_banner = ctk.CTkLabel(
+            t3, text="No worklist item selected - pick one on step 1.",
+            anchor="w", justify="left", text_color=MUTED,
+            font=ctk.CTkFont(size=14, weight="bold"))
+        self.sel_banner.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 2))
+        self.exam_summary = ctk.CTkLabel(t3, text="", anchor="w",
+                                         text_color=MUTED)
+        self.exam_summary.grid(row=1, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+
+        opt = ctk.CTkFrame(t3, fg_color="transparent")
+        opt.grid(row=2, column=0, sticky="ew", padx=PAD)
         self.opt_mpps = ctk.CTkCheckBox(opt, text="Send MPPS (In Progress / Completed)")
         self.opt_mpps.select()
         self.opt_mpps.pack(side="left")
@@ -126,8 +134,8 @@ class ModalitySCUPanel(ToolPanel):
                                              width=140)
         self.mpps_status.pack(side="left")
 
-        runbar = ctk.CTkFrame(ex, fg_color="transparent")
-        runbar.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
+        runbar = ctk.CTkFrame(t3, fg_color="transparent")
+        runbar.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
         self.perform_btn = ctk.CTkButton(runbar, text="Perform exam",
                                          command=self._perform)
         self.perform_btn.pack(side="left")
@@ -142,12 +150,14 @@ class ModalitySCUPanel(ToolPanel):
         self.workers.pack(side="left")
 
         self.runner = BatchRunner(self, verb="sent")
-        self.runner.build(ex).grid(row=5, column=0, sticky="nsew",
+        self.runner.build(t3).grid(row=4, column=0, sticky="nsew",
                                    padx=PAD, pady=(PAD, PAD))
+        self._refresh_exam_summary()
 
     def on_destinations_changed(self) -> None:
         self.ris.refresh()
         self.pacs.refresh()
+        self._refresh_exam_summary()
 
     # -- worklist --------------------------------------------------------
     def _reset_query(self) -> None:
@@ -201,7 +211,7 @@ class ModalitySCUPanel(ToolPanel):
             w.destroy()
         self._sel.set(-1)
         self.sel_banner.configure(
-            text="No worklist item selected - pick one on the Worklist tab.",
+            text="No worklist item selected - pick one on step 1.",
             text_color=MUTED)
         if not self._items:
             ctk.CTkLabel(self.results, text="No worklist items.",
@@ -295,6 +305,13 @@ class ModalitySCUPanel(ToolPanel):
     def _update_count(self) -> None:
         self.files = list(dict.fromkeys(self.files))
         self.count_lbl.configure(text=f"{len(self.files):,} exam image(s).")
+        self._refresh_exam_summary()
+
+    def _refresh_exam_summary(self) -> None:
+        pacs = self.pacs.get_node()
+        self.exam_summary.configure(
+            text=f"Images loaded: {len(self.files):,}     ·     "
+                 f"PACS: {pacs.name if pacs else '(none selected)'}")
 
     def requeue(self, requeue_paths: list) -> None:
         self.files = list(dict.fromkeys(Path(p) for p in requeue_paths))
