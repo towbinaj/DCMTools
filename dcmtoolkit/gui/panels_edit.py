@@ -9,6 +9,7 @@ workers, live progress, per-folder report and retry).
 from __future__ import annotations
 
 from pathlib import Path
+from tkinter import filedialog
 
 import customtkinter as ctk
 from pydicom import dcmread
@@ -21,7 +22,12 @@ from .base import ToolPanel
 from .batch import BatchRunner
 from .panels_files import _DropSourceMixin, _folder_totals
 from .theme import MUTED
-from .widgets import run_threaded, PAD
+from .widgets import build_drop_zone, run_threaded, PAD
+
+# "Loaded" banner color (light, dark) - a calm green that reads on both themes.
+_LOADED_GREEN = ("#2e8b57", "#43c59e")
+_LOADED_AMBER = "#d9a441"
+_LOADED_IDLE = "Nothing loaded — drag a study folder here, or use Load below."
 
 
 class _DemographicEditor(_DropSourceMixin, ToolPanel):
@@ -29,6 +35,8 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
     FIELDS: list[tuple[str, str, str]] = []   # (keyword, label, VR)
     entity = "record"
     level_key = "PatientID"
+    # Tags shown in the "Loaded:" banner so it's obvious which record is open.
+    identity_fields: list[str] = ["PatientID"]
 
     def build(self) -> None:
         self.files: list[Path] = []
@@ -45,9 +53,10 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
         self._make_source("Save").grid(row=0, column=0, sticky="ew",
                                        padx=PAD, pady=PAD)
 
-        self.status = ctk.CTkLabel(self.body, text="Add a folder or files to "
-                                   "load.", anchor="w", text_color=MUTED)
-        self.status.grid(row=1, column=0, sticky="w", padx=PAD)
+        self.status = ctk.CTkLabel(
+            self.body, text=_LOADED_IDLE, anchor="w", justify="left",
+            text_color=MUTED, font=ctk.CTkFont(size=14, weight="bold"))
+        self.status.grid(row=1, column=0, sticky="w", padx=PAD, pady=(0, 2))
 
         form = ctk.CTkFrame(self.body)
         form.grid(row=2, column=0, sticky="ew", padx=PAD, pady=PAD)
@@ -88,6 +97,66 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
                                           padx=PAD, pady=(0, PAD))
 
     # -- loading ---------------------------------------------------------
+    # An editor works on ONE record at a time, so loading REPLACES the queue
+    # (the shared mixin appends). This is why the fields refresh to the newly
+    # loaded study instead of quietly keeping the previous one's values.
+    def _make_source(self, action_verb="Save", extra_buttons=None):
+        specs = [("Load Folder...", self._add_folder, 130),
+                 ("Load Files...", self._add_files, 120),
+                 ("Clear", self._clear, 70)]
+        zone, self.count_lbl = build_drop_zone(
+            self.app, self.body, self._on_drop, action_verb, specs)
+        self.count_lbl.configure(font=ctk.CTkFont(size=13, weight="bold"))
+        return zone
+
+    def _add_files(self):
+        chosen = filedialog.askopenfilenames(
+            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
+        if chosen:
+            self.files = [Path(p) for p in chosen]   # replace, not append
+            self._update_count()
+
+    def _add_folder(self):
+        folder = filedialog.askdirectory()
+        if not folder:
+            return
+        self.count_lbl.configure(text="Scanning folder...")
+
+        def work():
+            return fileops.find_dicom_files(Path(folder))
+
+        def done(found):
+            self.files = list(found)                 # replace, not append
+            self.log.write(f"Loaded {len(found):,} file(s) from {folder}")
+            self._update_count()
+
+        run_threaded(self, work, done)
+
+    def _on_drop(self, dropped: list):
+        chosen = [Path(p) for p in dropped]
+        loose = [p for p in chosen if p.is_file()]
+        folders = [p for p in chosen if p.is_dir()]
+        if folders:
+            self.count_lbl.configure(text="Scanning dropped folder(s)...")
+
+            def work():
+                out = list(loose)
+                for d in folders:
+                    out.extend(fileops.find_dicom_files(d))
+                return out
+
+            def done(found):
+                self.files = list(found)             # replace, not append
+                self.log.write(f"Loaded {len(found):,} file(s).")
+                self._update_count()
+
+            run_threaded(self, work, done)
+        else:
+            self.files = loose                       # replace, not append
+            if loose:
+                self.log.write(f"Loaded {len(loose):,} dropped file(s).")
+            self._update_count()
+
     def _update_count(self):  # override: also (re)load demographics
         self.files = list(dict.fromkeys(self.files))
         self.count_lbl.configure(text=f"{len(self.files):,} file(s).")
@@ -99,8 +168,7 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
         for _kw, _label, _vr, entry, vlabel in self._field_widgets:
             entry.delete(0, "end")
             vlabel.configure(text="")
-        self.status.configure(text="Add a folder or files to load.",
-                              text_color=MUTED)
+        self.status.configure(text=_LOADED_IDLE, text_color=MUTED)
         self.count_lbl.configure(text="No files.")
 
     def _load_demographics(self):
@@ -120,6 +188,16 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
             self._orig[kw] = val
             self._validate_field(kw)
 
+        # Build an identifying label so it's obvious WHICH record is loaded.
+        idparts = [v for v in (str(ds.get(kw, "") or "").strip()
+                               for kw in self.identity_fields) if v]
+        ident = "  ·  ".join(idparts) if idparts else "(no identifiers)"
+
+        # Show it immediately; the background scan refines file count / spread.
+        self.status.configure(
+            text=f"Loaded: {ident}   ({len(self.files):,} file(s))",
+            text_color=_LOADED_GREEN)
+
         # Warn if the loaded files span more than one patient/study.
         key = self.level_key
         files = list(self.files)
@@ -138,13 +216,14 @@ class _DemographicEditor(_DropSourceMixin, ToolPanel):
             n = len(vals)
             if n > 1:
                 self.status.configure(
-                    text=f"! {len(files):,} files span {n} different "
-                         f"{self.entity} values — saving sets them ALL to the "
-                         f"values below.", text_color="#d9a441")
+                    text=f"⚠ Loaded: {ident}  —  {len(files):,} files span "
+                         f"{n} different {self.entity} values; Save sets them "
+                         f"ALL to the values below.", text_color=_LOADED_AMBER)
             else:
                 self.status.configure(
-                    text=f"{len(files):,} file(s), one {self.entity}. "
-                         f"Edit fields and Save.", text_color=MUTED)
+                    text=f"✓ Loaded: {ident}  —  {len(files):,} file(s), "
+                         f"one {self.entity}. Edit fields and Save.",
+                    text_color=_LOADED_GREEN)
 
         run_threaded(self, work, done)
 
@@ -217,6 +296,7 @@ class PatientEditPanel(_DemographicEditor):
                   "DICOM validation.")
     entity = "patient"
     level_key = "PatientID"
+    identity_fields = ["PatientID", "PatientName"]
     FIELDS = [
         ("PatientName", "Patient Name", "PN"),
         ("PatientID", "Patient ID", "LO"),
@@ -234,6 +314,7 @@ class StudyEditPanel(_DemographicEditor):
                   "DICOM validation.")
     entity = "study"
     level_key = "StudyInstanceUID"
+    identity_fields = ["AccessionNumber", "StudyDate", "StudyDescription"]
     FIELDS = [
         ("StudyDate", "Study Date (YYYYMMDD)", "DA"),
         ("StudyTime", "Study Time (HHMMSS)", "TM"),
@@ -250,6 +331,7 @@ class SeriesEditPanel(_DemographicEditor):
                   "DICOM validation.")
     entity = "series"
     level_key = "SeriesInstanceUID"
+    identity_fields = ["SeriesNumber", "Modality", "SeriesDescription"]
     FIELDS = [
         ("SeriesNumber", "Series Number", "IS"),
         ("SeriesDescription", "Series Description", "LO"),

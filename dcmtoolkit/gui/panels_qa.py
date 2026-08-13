@@ -46,8 +46,10 @@ class QAPanel(_DropSourceMixin, ToolPanel):
         self.body.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(4, weight=1)
 
+        self._scanned = False
         self._make_source("Scan").grid(row=0, column=0, sticky="ew",
                                        padx=PAD, pady=PAD)
+        self.count_lbl.configure(font=ctk.CTkFont(size=13, weight="bold"))
 
         bar = ctk.CTkFrame(self.body, fg_color="transparent")
         bar.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
@@ -89,6 +91,31 @@ class QAPanel(_DropSourceMixin, ToolPanel):
                           pady=(2, PAD))
         self.results.grid_columnconfigure(0, weight=1)
 
+    # -- source ----------------------------------------------------------
+    def _update_count(self):  # override: flag that shown findings are stale
+        self.files = list(dict.fromkeys(self.files))
+        self.count_lbl.configure(text=f"{len(self.files):,} file(s).")
+        if self._scanned:
+            # The loaded set changed after a scan - the findings below no
+            # longer describe what's loaded, so say so plainly.
+            self._scanned = False
+            self.status.configure(
+                text=f"Loaded {len(self.files):,} file(s) — changed since last "
+                     "scan. Press Scan to refresh.", text_color="#d9a441")
+
+    def _clear(self):
+        self.files = []
+        self._findings = []
+        self._scanned = False
+        for w in self.results.winfo_children():
+            w.destroy()
+        self.summary.configure(text="")
+        self.export_btn.configure(state="disabled")
+        self.progress.set(0)
+        self.count_lbl.configure(text="No files.")
+        self.status.configure(text="Add files or a folder, then Scan.",
+                              text_color=("gray10", "gray90"))
+
     # -- scan ------------------------------------------------------------
     def _do_cancel(self):
         self._cancel = True
@@ -112,7 +139,8 @@ class QAPanel(_DropSourceMixin, ToolPanel):
         total = len(files)
         workers = self._get_workers()
         self._scan = {"i": 0, "total": total}
-        self.status.configure(text=f"Scanning 0/{total:,} ...")
+        self.status.configure(text=f"Scanning 0/{total:,} ...",
+                              text_color=("gray10", "gray90"))
 
         def on_item(i, tot, f, ok, detail):
             with self._lock:
@@ -125,10 +153,12 @@ class QAPanel(_DropSourceMixin, ToolPanel):
 
         def done(result):
             self._findings = result.findings
+            self._scanned = True
             self._render()
             self.status.configure(
                 text=f"Scanned {result.files_read:,} file(s) - "
-                     f"{len(result.findings):,} finding(s).")
+                     f"{len(result.findings):,} finding(s).",
+                text_color=("gray10", "gray90"))
             self.progress.set(1.0)
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
