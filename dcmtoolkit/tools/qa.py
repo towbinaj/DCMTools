@@ -81,6 +81,13 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1) -> QAResu
             for kw in _FIELDS:
                 v = ds.get(kw)
                 rec[kw] = "" if v is None else str(v)
+            # DICOMDIR and other Media Storage Directory files are not image
+            # instances - exclude them from the instance-level checks.
+            fm = getattr(ds, "file_meta", None)
+            msc = str(getattr(fm, "MediaStorageSOPClassUID", "") or "") \
+                if fm is not None else ""
+            if msc == "1.2.840.10008.1.3.10" or f.name.upper() == "DICOMDIR":
+                rec["__skip"] = "DICOMDIR / media directory"
         except Exception as exc:  # noqa: BLE001
             ok, detail = False, str(exc).strip()[:120]
             rec = {"__file": f, "__unreadable": detail}
@@ -94,7 +101,8 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1) -> QAResu
     _run_pool(files, process, workers, stop)
 
     findings: list[Finding] = []
-    good = [r for r in records if not r.get("__unreadable")]
+    good = [r for r in records
+            if not r.get("__unreadable") and not r.get("__skip")]
 
     for r in records:
         if r.get("__unreadable"):
@@ -131,14 +139,24 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1) -> QAResu
                 groups.setdefault(k, []).append(r)
         for k, rs in groups.items():
             for kw in uniform:
-                vals = {(r.get(kw, "") or "(blank)") for r in rs}
-                if len(vals) > 1:
-                    joined = " | ".join(sorted(vals))
-                    findings.append(Finding(
-                        "incongruent",
-                        f"{level} {_short(k)}: {kw} differs "
-                        f"({len(vals)} values, {len(rs)} files)",
-                        joined[:300]))
+                by_val: dict[str, list[str]] = {}
+                for r in rs:
+                    v = r.get(kw, "") or "(blank)"
+                    by_val.setdefault(v, []).append(Path(r["__file"]).name)
+                if len(by_val) < 2:
+                    continue
+                # Most common value first, so outliers are easy to see.
+                parts = []
+                for v, names in sorted(by_val.items(),
+                                       key=lambda x: -len(x[1])):
+                    ex = ", ".join(names[:2])
+                    more = f" +{len(names) - 2}" if len(names) > 2 else ""
+                    parts.append(f"{v}  [{len(names)} file(s): {ex}{more}]")
+                findings.append(Finding(
+                    "incongruent",
+                    f"{level} {_short(k)}: {kw} differs "
+                    f"({len(by_val)} values, {len(rs)} files)",
+                    "  |  ".join(parts)[:500]))
 
     check("StudyInstanceUID", STUDY_UNIFORM, "Study")
     check("SeriesInstanceUID", SERIES_UNIFORM, "Series")
