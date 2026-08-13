@@ -12,6 +12,7 @@ import customtkinter as ctk
 from pydicom import dcmread
 
 from .. import config, paths
+from ..model import DEST_GROUP_WORKLIST
 from ..net import mwl, mpps, scu
 from ..tools.fileops import find_dicom_files
 from ..tools import modality as modtool
@@ -44,7 +45,8 @@ class ModalitySCUPanel(ToolPanel):
         conn.grid_columnconfigure(0, weight=1)
         conn.grid_columnconfigure(1, weight=1)
         self.ris = DestinationPicker(conn, self.app, label="Worklist / MPPS server",
-                                     remember_key="ModalityRIS")
+                                     remember_key="ModalityRIS",
+                                     groups=[DEST_GROUP_WORKLIST])
         self.ris.grid(row=0, column=0, sticky="ew", padx=(0, PAD))
         self.pacs = DestinationPicker(conn, self.app, label="Send images to (PACS)",
                                       remember_key="ModalityPACS")

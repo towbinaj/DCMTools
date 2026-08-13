@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .model import Node
+from .model import Node, DEST_GROUPS, DEST_GROUP_STORAGE
 
 
 LEGACY_FILES = ["DCMSend.csv", "DCMQueryMove.csv", "DCMDropMove.csv"]
@@ -53,9 +53,12 @@ def _node_from_cols(cols: list[str], source: str) -> Node | None:
     if port_i <= 0:
         return None
     calling = cols[4].strip() if len(cols) >= 5 else ""
+    group = cols[5].strip() if len(cols) >= 6 else ""
+    if group not in DEST_GROUPS:
+        group = DEST_GROUP_STORAGE
     return Node(name=name or aetitle, aetitle=aetitle, host=host,
                port=port_i, note=f"imported from {source}",
-               calling_aetitle=calling)
+               calling_aetitle=calling, group=group)
 
 
 def parse_file(path: Path) -> list[Node]:
@@ -165,10 +168,11 @@ def export_csv(nodes: list[Node], path: Path) -> None:
     """Write destinations to a simple, re-importable CSV (with header)."""
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["name", "aetitle", "host", "port", "calling_aetitle"])
+        writer.writerow(["name", "aetitle", "host", "port", "calling_aetitle",
+                         "group"])
         for n in nodes:
             writer.writerow([n.name, n.aetitle, n.host, n.port,
-                             n.calling_aetitle])
+                             n.calling_aetitle, n.group])
 
 
 def export_json(nodes: list[Node], path: Path) -> None:

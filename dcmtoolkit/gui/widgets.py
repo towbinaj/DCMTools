@@ -13,7 +13,7 @@ from typing import Callable
 
 import customtkinter as ctk
 
-from ..model import Node
+from ..model import Node, DEST_GROUP_STORAGE
 from .theme import MUTED, mono
 
 
@@ -74,10 +74,13 @@ class DestinationPicker(ctk.CTkFrame):
     """Dropdown of saved destinations, resolving to a :class:`Node`."""
 
     def __init__(self, master, app, label: str = "Destination",
-                 remember_key: str = "", **kw):
+                 remember_key: str = "", groups=None, **kw):
         super().__init__(master, fg_color="transparent", **kw)
         self.app = app
         self.remember_key = remember_key
+        # Which destination group(s) to show. Default: storage targets only, so
+        # worklist/MPPS servers don't appear in the storage-oriented pickers.
+        self.groups = tuple(groups) if groups else (DEST_GROUP_STORAGE,)
         self._nodes: list[Node] = []
 
         ctk.CTkLabel(self, text=label, width=90, anchor="w").grid(
@@ -98,7 +101,10 @@ class DestinationPicker(ctk.CTkFrame):
         return ""
 
     def refresh(self) -> None:
-        self._nodes = list(self.app.destinations)
+        self._nodes = sorted(
+            (n for n in self.app.destinations
+             if (n.group or DEST_GROUP_STORAGE) in self.groups),
+            key=lambda n: n.name.lower())
         labels = [n.name for n in self._nodes]
         self.combo.configure(values=labels)
         if labels:

@@ -9,9 +9,9 @@ import customtkinter as ctk
 
 from .. import config
 from ..importer import (import_legacy, import_any, export_csv, export_json)
-from ..model import Node
+from ..model import Node, DEST_GROUPS, DEST_GROUP_STORAGE
 from .base import ToolPanel
-from .theme import SCALE_OPTIONS, apply_scale, scale_name
+from .theme import MUTED, SCALE_OPTIONS, apply_scale, scale_name
 from .widgets import PAD
 
 
@@ -34,19 +34,24 @@ class _DestRow(ctk.CTkFrame):
         self.timeout = ctk.CTkEntry(self, width=52, placeholder_text="Tmo")
         self.timeout.insert(0, str(node.timeout))
         self.timeout.grid(row=0, column=4, padx=2, pady=2)
+        # Group: storage target vs worklist/MPPS server.
+        self.group = ctk.CTkOptionMenu(self, values=DEST_GROUPS, width=140)
+        self.group.set(node.group if node.group in DEST_GROUPS
+                       else DEST_GROUP_STORAGE)
+        self.group.grid(row=0, column=5, padx=2, pady=2)
         # Optional per-node calling AE (blank = use the app-wide My AE Title).
         self.calling = ctk.CTkEntry(self, width=110,
                                     placeholder_text="Calling AE (opt)")
         self.calling.insert(0, node.calling_aetitle)
-        self.calling.grid(row=0, column=5, padx=2, pady=2)
+        self.calling.grid(row=0, column=6, padx=2, pady=2)
         self.tls = ctk.CTkCheckBox(self, text="TLS", width=48)
         if node.tls:
             self.tls.select()
-        self.tls.grid(row=0, column=6, padx=2, pady=2)
+        self.tls.grid(row=0, column=7, padx=2, pady=2)
         ctk.CTkButton(self, text="X", width=28, fg_color="#a33",
                       hover_color="#c44",
                       command=lambda: on_delete(self)).grid(
-            row=0, column=7, padx=2)
+            row=0, column=8, padx=2)
 
     def to_node(self) -> Node | None:
         if not self.aet.get().strip() and not self.host.get().strip():
@@ -63,6 +68,7 @@ class _DestRow(ctk.CTkFrame):
                     aetitle=self.aet.get().strip(),
                     host=self.host.get().strip(), port=port,
                     timeout=timeout, tls=bool(self.tls.get()),
+                    group=self.group.get(),
                     calling_aetitle=self.calling.get().strip())
 
 
@@ -172,8 +178,24 @@ class SettingsPanel(ToolPanel):
     def _load_rows(self) -> None:
         for r in self._rows:
             r.destroy()
+        for h in getattr(self, "_headers", []):
+            h.destroy()
         self._rows = []
-        for node in self.app.destinations:
+        self._headers = []
+        # Alphabetical within each group; groups shown with a header.
+        nodes = sorted(self.app.destinations,
+                       key=lambda n: ((n.group or DEST_GROUP_STORAGE).lower(),
+                                      n.name.lower()))
+        current = None
+        for node in nodes:
+            grp = node.group or DEST_GROUP_STORAGE
+            if grp != current:
+                current = grp
+                hdr = ctk.CTkLabel(self.rows_frame, text=grp.upper(),
+                                   anchor="w", text_color=MUTED,
+                                   font=ctk.CTkFont(size=12, weight="bold"))
+                hdr.grid(sticky="w", padx=4, pady=(8, 0))
+                self._headers.append(hdr)
             self._append_row(node)
 
     def _append_row(self, node: Node) -> None:

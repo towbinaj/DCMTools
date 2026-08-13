@@ -8,6 +8,13 @@ from dataclasses import dataclass, asdict, field
 
 AE_TITLE_MAX = 16
 
+# Destination groups. Storage targets (PACS/VNA/workstations) are the default;
+# worklist/MPPS servers (RIS) are a separate kind so they don't show up in the
+# storage-oriented pickers (Send, Query, Retrieve, ...).
+DEST_GROUP_STORAGE = "PACS / Storage"
+DEST_GROUP_WORKLIST = "Worklist / MPPS"
+DEST_GROUPS = [DEST_GROUP_STORAGE, DEST_GROUP_WORKLIST]
+
 
 @dataclass
 class Node:
@@ -24,6 +31,8 @@ class Node:
     note: str = ""
     timeout: int = 30
     tls: bool = False
+    # Which picker(s) this destination shows up in (storage vs worklist/MPPS).
+    group: str = DEST_GROUP_STORAGE
     # Optional local (calling) AE Title to present when associating with THIS
     # node. Empty means fall back to the app-wide "My AE Title". Lets a single
     # tool talk to, e.g., a worklist server that only answers a registered
@@ -43,6 +52,7 @@ class Node:
             note=str(d.get("note", "")).strip(),
             timeout=int(d.get("timeout", 30) or 30),
             tls=bool(d.get("tls", False)),
+            group=str(d.get("group", "") or DEST_GROUP_STORAGE).strip(),
             calling_aetitle=str(d.get("calling_aetitle", "")).strip(),
         )
 
