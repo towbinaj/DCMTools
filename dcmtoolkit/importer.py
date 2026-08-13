@@ -52,8 +52,10 @@ def _node_from_cols(cols: list[str], source: str) -> Node | None:
         return None
     if port_i <= 0:
         return None
+    calling = cols[4].strip() if len(cols) >= 5 else ""
     return Node(name=name or aetitle, aetitle=aetitle, host=host,
-               port=port_i, note=f"imported from {source}")
+               port=port_i, note=f"imported from {source}",
+               calling_aetitle=calling)
 
 
 def parse_file(path: Path) -> list[Node]:
@@ -163,9 +165,10 @@ def export_csv(nodes: list[Node], path: Path) -> None:
     """Write destinations to a simple, re-importable CSV (with header)."""
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["name", "aetitle", "host", "port"])
+        writer.writerow(["name", "aetitle", "host", "port", "calling_aetitle"])
         for n in nodes:
-            writer.writerow([n.name, n.aetitle, n.host, n.port])
+            writer.writerow([n.name, n.aetitle, n.host, n.port,
+                             n.calling_aetitle])
 
 
 def export_json(nodes: list[Node], path: Path) -> None:

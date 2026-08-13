@@ -84,7 +84,7 @@ class MoveResult:
 # ---------------------------------------------------------------------------
 def c_echo(my_aetitle: str, node: Node, timeout: int = 30,
            progress: Progress = _noop, tls_args=None) -> EchoResult:
-    ae = AE(ae_title=my_aetitle)
+    ae = AE(ae_title=node.calling(my_aetitle))
     ae.requested_contexts = VerificationPresentationContexts
     ae.acse_timeout = timeout
     ae.dimse_timeout = timeout
@@ -266,7 +266,7 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
         bump(ok, f, code)
 
     def worker():
-        ae = AE(ae_title=my_aetitle)
+        ae = AE(ae_title=node.calling(my_aetitle))
         ae.requested_contexts = contexts
         ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
         assoc = ae.associate(node.host, node.port, ae_title=node.aetitle,
@@ -354,7 +354,7 @@ def c_find(my_aetitle: str, node: Node, identifier: Dataset,
     result = FindResult()
     find_model = _FIND_MODELS[model.upper()]
 
-    ae = AE(ae_title=my_aetitle)
+    ae = AE(ae_title=node.calling(my_aetitle))
     ae.add_requested_context(find_model)
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 
@@ -388,7 +388,7 @@ def c_move(my_aetitle: str, node: Node, dest_aetitle: str,
     result = MoveResult()
     move_model = _MOVE_MODELS[model.upper()]
 
-    ae = AE(ae_title=my_aetitle)
+    ae = AE(ae_title=node.calling(my_aetitle))
     ae.add_requested_context(move_model)
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 
@@ -467,7 +467,7 @@ def c_get(my_aetitle: str, node: Node, identifier: Dataset, out_dir: Path,
             on_object(saved["n"], saved["remaining"])
         return 0x0000
 
-    ae = AE(ae_title=my_aetitle)
+    ae = AE(ae_title=node.calling(my_aetitle))
     ae.add_requested_context(get_model)
     # Propose storage contexts with the SCP role so the remote can send objects
     # back to us. Cap to stay within the 128-context association limit.
@@ -546,7 +546,7 @@ def storage_commit(my_aetitle: str, node: Node, sop_refs: list[tuple[str, str]],
         return 0x0000
 
     # Local SCP to catch the report.
-    scp_ae = AE(ae_title=my_aetitle)
+    scp_ae = AE(ae_title=node.calling(my_aetitle))
     scp_ae.add_supported_context(StorageCommitmentPushModel)
     server = scp_ae.start_server(
         ("0.0.0.0", listen_port), block=False,
@@ -563,7 +563,7 @@ def storage_commit(my_aetitle: str, node: Node, sop_refs: list[tuple[str, str]],
             item.ReferencedSOPInstanceUID = sop_inst
             req.ReferencedSOPSequence.append(item)
 
-        ae = AE(ae_title=my_aetitle)
+        ae = AE(ae_title=node.calling(my_aetitle))
         ae.add_requested_context(StorageCommitmentPushModel)
         ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
         progress(f"Requesting commitment for {len(sop_refs)} instance(s)...")

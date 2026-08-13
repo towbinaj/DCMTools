@@ -24,6 +24,11 @@ class Node:
     note: str = ""
     timeout: int = 30
     tls: bool = False
+    # Optional local (calling) AE Title to present when associating with THIS
+    # node. Empty means fall back to the app-wide "My AE Title". Lets a single
+    # tool talk to, e.g., a worklist server that only answers a registered
+    # modality AE, without changing the global identity used everywhere else.
+    calling_aetitle: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -38,7 +43,12 @@ class Node:
             note=str(d.get("note", "")).strip(),
             timeout=int(d.get("timeout", 30) or 30),
             tls=bool(d.get("tls", False)),
+            calling_aetitle=str(d.get("calling_aetitle", "")).strip(),
         )
+
+    def calling(self, default: str) -> str:
+        """The local AE Title to present for this node (override, else default)."""
+        return self.calling_aetitle or default
 
     def validate(self) -> list[str]:
         """Return a list of human-readable problems; empty means valid."""
@@ -51,6 +61,10 @@ class Node:
             problems.append(
                 f"AE Title '{self.aetitle}' exceeds {AE_TITLE_MAX} characters."
             )
+        if self.calling_aetitle and len(self.calling_aetitle) > AE_TITLE_MAX:
+            problems.append(
+                f"Calling AE '{self.calling_aetitle}' exceeds "
+                f"{AE_TITLE_MAX} characters.")
         if not self.host:
             problems.append("Host is empty.")
         else:

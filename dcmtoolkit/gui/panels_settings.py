@@ -34,14 +34,19 @@ class _DestRow(ctk.CTkFrame):
         self.timeout = ctk.CTkEntry(self, width=52, placeholder_text="Tmo")
         self.timeout.insert(0, str(node.timeout))
         self.timeout.grid(row=0, column=4, padx=2, pady=2)
+        # Optional per-node calling AE (blank = use the app-wide My AE Title).
+        self.calling = ctk.CTkEntry(self, width=110,
+                                    placeholder_text="Calling AE (opt)")
+        self.calling.insert(0, node.calling_aetitle)
+        self.calling.grid(row=0, column=5, padx=2, pady=2)
         self.tls = ctk.CTkCheckBox(self, text="TLS", width=48)
         if node.tls:
             self.tls.select()
-        self.tls.grid(row=0, column=5, padx=2, pady=2)
+        self.tls.grid(row=0, column=6, padx=2, pady=2)
         ctk.CTkButton(self, text="X", width=28, fg_color="#a33",
                       hover_color="#c44",
                       command=lambda: on_delete(self)).grid(
-            row=0, column=6, padx=2)
+            row=0, column=7, padx=2)
 
     def to_node(self) -> Node | None:
         if not self.aet.get().strip() and not self.host.get().strip():
@@ -57,7 +62,8 @@ class _DestRow(ctk.CTkFrame):
         return Node(name=self.name.get().strip() or self.aet.get().strip(),
                     aetitle=self.aet.get().strip(),
                     host=self.host.get().strip(), port=port,
-                    timeout=timeout, tls=bool(self.tls.get()))
+                    timeout=timeout, tls=bool(self.tls.get()),
+                    calling_aetitle=self.calling.get().strip())
 
 
 class SettingsPanel(ToolPanel):

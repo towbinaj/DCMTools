@@ -76,7 +76,7 @@ def query_worklist(my_aetitle: str, node: Node, identifier: Dataset,
     """Run the worklist C-FIND and return the matched scheduled steps."""
     result = FindResult()
 
-    ae = AE(ae_title=my_aetitle)
+    ae = AE(ae_title=node.calling(my_aetitle))
     ae.add_requested_context(ModalityWorklistInformationFind)
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
 

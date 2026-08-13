@@ -124,7 +124,7 @@ def build_set(status: str, series: list[dict] | None = None, *,
 
 
 def _associate(my_aetitle: str, node: Node, timeout: int, tls_args):
-    ae = AE(ae_title=my_aetitle)
+    ae = AE(ae_title=node.calling(my_aetitle))
     ae.add_requested_context(ModalityPerformedProcedureStep)
     ae.acse_timeout = ae.dimse_timeout = ae.network_timeout = timeout
     return ae.associate(node.host, node.port, ae_title=node.aetitle,
