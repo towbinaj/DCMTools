@@ -18,7 +18,7 @@ from ..tools.fileops import find_dicom_files
 from ..tools import modality as modtool
 from .base import ToolPanel
 from .batch import BatchRunner
-from .theme import MUTED, mono
+from .theme import MUTED, mono, tool_color
 from .widgets import DestinationPicker, build_drop_zone, run_threaded, PAD
 
 
@@ -41,8 +41,22 @@ class ModalitySCUPanel(ToolPanel):
         self.body.grid_rowconfigure(0, weight=1)
 
         # Three-step workflow, one tab per step, so each gets the full height.
-        self.tabs = ctk.CTkTabview(self.body)
+        # Color the active tab with the tool accent so the steps stand out.
+        accent = tool_color(type(self).__name__)
+        self.tabs = ctk.CTkTabview(
+            self.body,
+            segmented_button_fg_color=("gray72", "gray28"),
+            segmented_button_selected_color=accent,
+            segmented_button_selected_hover_color=accent,
+            segmented_button_unselected_color=("gray72", "gray28"),
+            segmented_button_unselected_hover_color=("gray66", "gray34"),
+            text_color=("gray10", "gray92"))
         self.tabs.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
+        try:
+            self.tabs._segmented_button.configure(
+                font=ctk.CTkFont(size=14, weight="bold"), height=32)
+        except Exception:  # noqa: BLE001 - private attr, non-fatal styling
+            pass
         t1 = self.tabs.add("1 · Worklist")
         t2 = self.tabs.add("2 · Exam images")
         t3 = self.tabs.add("3 · Perform")
