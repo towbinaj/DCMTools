@@ -54,6 +54,7 @@ TOOL_COLORS: dict[str, str] = {
     "DumpPanel": "#4a9ca0",          # dark teal
     "DeidentifyPanel": "#cf6f9b",    # pink
     "QAPanel": "#5cb85c",            # green
+    "ModalitySCUPanel": "#e0a94a",   # amber-gold
     "PatientEditPanel": "#5aa9c9",   # cyan
     "StudyEditPanel": "#b08cd8",     # lavender
     "SeriesEditPanel": "#d69f5b",    # amber

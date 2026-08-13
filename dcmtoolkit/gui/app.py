@@ -19,6 +19,7 @@ from .panels_network import (EchoPanel, SendPanel, QueryMovePanel,
 from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
                            DeidentifyPanel)
 from .panels_edit import PatientEditPanel, StudyEditPanel, SeriesEditPanel
+from .panels_modality import ModalitySCUPanel
 from .panels_qa import QAPanel
 from .panels_settings import SettingsPanel
 from .panels_logs import LogPanel
@@ -38,6 +39,7 @@ NAV_GROUPS = [
     ("Files", [TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
                DeidentifyPanel, QAPanel]),
     ("Edit demographics", [PatientEditPanel, StudyEditPanel, SeriesEditPanel]),
+    ("Modality", [ModalitySCUPanel]),
 ]
 
 
