@@ -60,8 +60,14 @@ class App(*_APP_BASES):
         apply_scale(self.settings.ui_scale)
 
         self.title(f"{APP_NAME}  v{__version__}")
-        self.geometry("1040x720")
         self.minsize(860, 580)
+        # Restore the previous window size/position, if remembered and on-screen.
+        if self.settings.window_geometry and self._geometry_on_screen(
+                self.settings.window_geometry):
+            self.geometry(self.settings.window_geometry)
+        else:
+            self.geometry("1040x720")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         icon = paths.resource_dir() / "assets" / "icon.ico"
         if icon.exists():
@@ -153,19 +159,54 @@ class App(*_APP_BASES):
             btn.configure(fg_color=("gray80", "gray28") if k == key
                           else "transparent")
 
-    def enable_drop(self, widget, on_paths) -> bool:
+    def _geometry_on_screen(self, geo: str) -> bool:
+        """True if a saved 'WxH+X+Y' would open (mostly) on the current screen."""
+        import re
+        m = re.match(r"\d+x\d+([+-]\d+)([+-]\d+)$", geo)
+        if not m:
+            return False
+        x, y = int(m.group(1)), int(m.group(2))
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        return -50 <= x <= sw - 100 and -20 <= y <= sh - 100
+
+    def _on_close(self) -> None:
+        # Remember the window size/position for next launch.
+        try:
+            self.settings.window_geometry = self.geometry()
+            config.save_settings(self.settings)
+        except Exception:  # noqa: BLE001
+            pass
+        # Stop the receiver SCP if it's still listening, so the process exits.
+        recv = self.panels.get("ReceiverPanel")
+        if recv is not None and getattr(recv, "scp", None):
+            try:
+                recv.scp.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        self.destroy()
+
+    def enable_drop(self, widget, on_paths, on_enter=None, on_leave=None) -> bool:
         """Register a widget as a file/folder drop target.
 
         ``on_paths`` receives a list of dropped filesystem paths (strings).
+        ``on_enter``/``on_leave`` fire while a drag hovers, for visual feedback.
         Returns False if drag-and-drop is unavailable.
         """
         if not self._dnd_ok:
             return False
         try:
             widget.drop_target_register(DND_FILES)
-            widget.dnd_bind(
-                "<<Drop>>",
-                lambda e: on_paths(list(self.tk.splitlist(e.data))))
+
+            def _drop(e):
+                if on_leave:
+                    on_leave()
+                on_paths(list(self.tk.splitlist(e.data)))
+
+            widget.dnd_bind("<<Drop>>", _drop)
+            if on_enter:
+                widget.dnd_bind("<<DropEnter>>", lambda e: on_enter())
+            if on_leave:
+                widget.dnd_bind("<<DropLeave>>", lambda e: on_leave())
             return True
         except Exception:  # noqa: BLE001
             return False

@@ -19,6 +19,7 @@ class Settings:
     my_aetitle: str = "DICOMTOOLKIT"
     appearance: str = "system"  # system | light | dark
     ui_scale: float = 1.15  # global widget/font scale for readability
+    window_geometry: str = ""  # remembered "WxH+X+Y" across sessions
     # Store Receiver defaults
     scp_aetitle: str = "STORESCP"
     scp_port: int = 104

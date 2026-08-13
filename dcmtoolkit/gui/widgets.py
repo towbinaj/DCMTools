@@ -129,6 +129,51 @@ class DestinationPicker(ctk.CTkFrame):
         return None
 
 
+def build_drop_zone(app, parent, on_paths, action_verb: str, button_specs):
+    """A prominent drag-and-drop area with the tool's Add buttons inside it.
+
+    ``button_specs`` is a list of ``(text, command, width)``. Returns
+    ``(zone_frame, count_label)`` - the caller updates ``count_label``.
+    Highlights on drag-over so it's obvious files/folders can be dropped.
+    """
+    default_border = ("gray60", "gray45")
+    zone = ctk.CTkFrame(parent, border_width=2, border_color=default_border,
+                        corner_radius=10)
+    zone.grid_columnconfigure(0, weight=1)
+
+    big = ctk.CTkLabel(zone, text="↓   Drag files or folders here",
+                       font=ctk.CTkFont(size=16, weight="bold"))
+    big.grid(row=0, column=0, pady=(12, 2))
+    sub = ctk.CTkLabel(zone, text=f"then press {action_verb}"
+                                  "  —  or use the buttons below",
+                       text_color=MUTED)
+    sub.grid(row=1, column=0, pady=(0, 8))
+
+    btnrow = ctk.CTkFrame(zone, fg_color="transparent")
+    btnrow.grid(row=2, column=0, pady=(0, 12))
+    for text, cmd, width in button_specs:
+        ctk.CTkButton(btnrow, text=text, command=cmd, width=width).pack(
+            side="left", padx=6)
+    count = ctk.CTkLabel(btnrow, text="No files.", text_color=MUTED)
+    count.pack(side="left", padx=12)
+
+    def enter():
+        zone.configure(border_color="#4f9dde")
+        big.configure(text="↓   Release to add files / folders")
+
+    def leave():
+        zone.configure(border_color=default_border)
+        big.configure(text="↓   Drag files or folders here")
+
+    ok = app.enable_drop(zone, on_paths, on_enter=enter, on_leave=leave)
+    for w in (big, sub, btnrow):
+        app.enable_drop(w, on_paths, on_enter=enter, on_leave=leave)
+    if not ok:
+        big.configure(text="Add files or a folder")
+        sub.configure(text="(drag-and-drop unavailable on this system)")
+    return zone, count
+
+
 def section(master, text: str) -> ctk.CTkLabel:
     lbl = ctk.CTkLabel(master, text=text,
                        font=ctk.CTkFont(size=15, weight="bold"), anchor="w")

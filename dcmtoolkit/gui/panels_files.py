@@ -12,7 +12,7 @@ from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .batch import BatchRunner
 from .theme import MUTED
-from .widgets import run_threaded, PAD
+from .widgets import build_drop_zone, run_threaded, PAD
 
 
 def _split(text: str) -> list[str]:
@@ -59,26 +59,14 @@ class TagListPanel(ToolPanel):
 class _DropSourceMixin:
     """Shared Add Files / Add Folder / drag-drop into ``self.files``."""
 
-    def _make_source(self, extra=None):
-        src = ctk.CTkFrame(self.body, border_width=2,
-                           border_color=("gray70", "gray40"))
-        ctk.CTkButton(src, text="Add Files...",
-                      command=self._add_files).pack(side="left", padx=6,
-                                                    pady=8)
-        ctk.CTkButton(src, text="Add Folder...",
-                      command=self._add_folder).pack(side="left", padx=6)
-        if extra:
-            extra(src)
-        self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color=MUTED)
-        self.count_lbl.pack(side="left", padx=PAD)
-        self.drop_hint = ctk.CTkLabel(src, text="…or drag files / folders here",
-                                      text_color=MUTED)
-        self.drop_hint.pack(side="right", padx=12)
-        if self.app.enable_drop(src, self._on_drop):
-            self.app.enable_drop(self.drop_hint, self._on_drop)
-        else:
-            self.drop_hint.configure(text="")
-        return src
+    def _make_source(self, action_verb: str = "Run", extra_buttons=None):
+        specs = [("Add Files...", self._add_files, 110),
+                 ("Add Folder...", self._add_folder, 120)]
+        if extra_buttons:
+            specs += extra_buttons
+        zone, self.count_lbl = build_drop_zone(
+            self.app, self.body, self._on_drop, action_verb, specs)
+        return zone
 
     def _add_files(self):
         chosen = filedialog.askopenfilenames(
@@ -151,8 +139,8 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
         self.body.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(4, weight=1)
 
-        self._make_source().grid(row=0, column=0, sticky="ew", padx=PAD,
-                                 pady=PAD)
+        self._make_source("Apply").grid(row=0, column=0, sticky="ew", padx=PAD,
+                                        pady=PAD)
 
         opsframe = ctk.CTkFrame(self.body)
         opsframe.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
@@ -235,8 +223,8 @@ class SplitPanel(_DropSourceMixin, ToolPanel):
         self.body.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(3, weight=1)
 
-        self._make_source().grid(row=0, column=0, sticky="ew", padx=PAD,
-                                 pady=PAD)
+        self._make_source("Split").grid(row=0, column=0, sticky="ew", padx=PAD,
+                                        pady=PAD)
 
         outbar = ctk.CTkFrame(self.body, fg_color="transparent")
         outbar.grid(row=1, column=0, sticky="ew", padx=PAD)
@@ -304,8 +292,8 @@ class DumpPanel(_DropSourceMixin, ToolPanel):
         self.body.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(2, weight=1)
 
-        self._make_source().grid(row=0, column=0, sticky="ew", padx=PAD,
-                                 pady=PAD)
+        self._make_source("Scan").grid(row=0, column=0, sticky="ew", padx=PAD,
+                                       pady=PAD)
 
         btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
         btnbar.grid(row=1, column=0, sticky="w", padx=PAD, pady=PAD)
@@ -370,25 +358,12 @@ class DeidentifyPanel(ToolPanel):
         self.body.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(3, weight=1)
 
-        src = ctk.CTkFrame(self.body, border_width=2,
-                           border_color=("gray70", "gray40"))
-        src.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkButton(src, text="Add Files...",
-                      command=self._add_files).pack(side="left", padx=6,
-                                                    pady=8)
-        ctk.CTkButton(src, text="Add Folder...",
-                      command=self._add_folder).pack(side="left", padx=6)
-        ctk.CTkButton(src, text="Output folder...",
-                      command=self._pick_out).pack(side="left", padx=6)
-        self.count_lbl = ctk.CTkLabel(src, text="No files.", text_color=MUTED)
-        self.count_lbl.pack(side="left", padx=PAD)
-        self.drop_hint = ctk.CTkLabel(src, text="…or drag files / folders here",
-                                      text_color=MUTED)
-        self.drop_hint.pack(side="right", padx=12)
-        if self.app.enable_drop(src, self._on_drop):
-            self.app.enable_drop(self.drop_hint, self._on_drop)
-        else:
-            self.drop_hint.configure(text="")
+        zone, self.count_lbl = build_drop_zone(
+            self.app, self.body, self._on_drop, "De-identify",
+            [("Add Files...", self._add_files, 110),
+             ("Add Folder...", self._add_folder, 120),
+             ("Output folder...", self._pick_out, 130)])
+        zone.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
 
         form = ctk.CTkScrollableFrame(self.body, height=230)
         form.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)

@@ -18,7 +18,8 @@ from ..tools.fileops import find_dicom_files
 from .base import ToolPanel
 from .batch import BatchRunner
 from .theme import MUTED
-from .widgets import DestinationPicker, run_threaded, section, PAD
+from .widgets import (DestinationPicker, build_drop_zone, run_threaded,
+                      section, PAD)
 
 
 class EchoPanel(ToolPanel):
@@ -190,23 +191,12 @@ class SendPanel(ToolPanel):
         self.picker.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
 
         self.files: list[Path] = []
-        dropf = ctk.CTkFrame(self.body, border_width=2,
-                             border_color=("gray70", "gray40"))
-        dropf.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkButton(dropf, text="Add Files...", command=self._add_files).pack(
-            side="left", padx=6, pady=8)
-        ctk.CTkButton(dropf, text="Add Folder...",
-                      command=self._add_folder).pack(side="left", padx=6)
-        ctk.CTkButton(dropf, text="Clear", width=70,
-                      command=self._clear).pack(side="left", padx=6)
-        self.drop_hint = ctk.CTkLabel(
-            dropf, text="…or drag files / folders here, then press Send",
-            text_color=MUTED)
-        self.drop_hint.pack(side="right", padx=12)
-
-        self.count_lbl = ctk.CTkLabel(self.body, text="No files selected.",
-                                      anchor="w")
-        self.count_lbl.grid(row=2, column=0, sticky="w", padx=PAD)
+        zone, self.count_lbl = build_drop_zone(
+            self.app, self.body, self._on_drop, "Send",
+            [("Add Files...", self._add_files, 110),
+             ("Add Folder...", self._add_folder, 120),
+             ("Clear", self._clear, 70)])
+        zone.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
 
         runbar = ctk.CTkFrame(self.body, fg_color="transparent")
         runbar.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
@@ -221,11 +211,6 @@ class SendPanel(ToolPanel):
         self.runner = BatchRunner(self, verb="sent")
         self.runner.build(self.body).grid(row=5, column=0, sticky="nsew",
                                           padx=PAD, pady=PAD)
-
-        if self.app.enable_drop(dropf, self._on_drop):
-            self.app.enable_drop(self.drop_hint, self._on_drop)
-        else:
-            self.drop_hint.configure(text="")
 
     def on_destinations_changed(self) -> None:
         self.picker.refresh()
