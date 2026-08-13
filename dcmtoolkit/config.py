@@ -22,6 +22,7 @@ class Settings:
     window_geometry: str = ""  # remembered "WxH+X+Y" across sessions
     last_tool: str = ""  # remembered last-selected tool panel
     send_workers: int = 4  # parallel C-STORE associations for Send
+    file_workers: int = 4  # parallel workers for local file tools
     # Store Receiver defaults
     scp_aetitle: str = "STORESCP"
     scp_port: int = 104

@@ -7,6 +7,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
+from .. import config
 from ..tools import fileops
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
@@ -132,6 +133,23 @@ class _DropSourceMixin:
     def _cancel(self):
         self.runner.cancel()
 
+    def _workers_control(self, btnbar):
+        ctk.CTkLabel(btnbar, text="Parallel").pack(side="left", padx=(PAD, 4))
+        self.workers = ctk.CTkOptionMenu(
+            btnbar, values=["1", "2", "4", "6", "8"], width=64)
+        self.workers.set(str(self.app.settings.file_workers))
+        self.workers.pack(side="left")
+
+    def _get_workers(self):
+        try:
+            w = int(self.workers.get())
+        except (ValueError, AttributeError):
+            w = 4
+        if self.app.settings.file_workers != w:
+            self.app.settings.file_workers = w
+            config.save_settings(self.app.settings)
+        return w
+
 
 class ModifyPanel(_DropSourceMixin, ToolPanel):
     title = "Modify Header"
@@ -179,6 +197,7 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
+        self._workers_control(btnbar)
 
         self.runner = BatchRunner(self, verb="changed")
         self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
@@ -208,7 +227,8 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             return fileops.modify_files(
                 files, ops, in_place=in_place, progress=self.progress,
                 on_item=self.runner.on_item,
-                should_cancel=lambda: self.runner.cancelled)
+                should_cancel=lambda: self.runner.cancelled,
+                workers=self._get_workers())
 
         def on_done():
             self.btn.configure(state="normal")
@@ -252,6 +272,7 @@ class SplitPanel(_DropSourceMixin, ToolPanel):
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
+        self._workers_control(btnbar)
 
         self.runner = BatchRunner(self, verb="split")
         self.runner.build(self.body).grid(row=3, column=0, sticky="nsew",
@@ -278,7 +299,8 @@ class SplitPanel(_DropSourceMixin, ToolPanel):
             return fileops.split_multiframe(
                 files, out, progress=self.progress,
                 on_item=self.runner.on_item,
-                should_cancel=lambda: self.runner.cancelled)
+                should_cancel=lambda: self.runner.cancelled,
+                workers=self._get_workers())
 
         def on_done():
             self.btn.configure(state="normal")
@@ -315,6 +337,7 @@ class DumpPanel(_DropSourceMixin, ToolPanel):
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
+        self._workers_control(btnbar)
 
         self.runner = BatchRunner(self, verb="read")
         self.runner.build(self.body).grid(row=2, column=0, sticky="nsew",
@@ -333,7 +356,8 @@ class DumpPanel(_DropSourceMixin, ToolPanel):
         def worker():
             self._last_dump = fileops.dump_files(
                 files, progress=self.progress, on_item=self.runner.on_item,
-                should_cancel=lambda: self.runner.cancelled)
+                should_cancel=lambda: self.runner.cancelled,
+                workers=self._get_workers())
             return self._last_dump
 
         def on_done():
@@ -352,7 +376,7 @@ class DumpPanel(_DropSourceMixin, ToolPanel):
                         folder_totals=_folder_totals(files))
 
 
-class DeidentifyPanel(ToolPanel):
+class DeidentifyPanel(_DropSourceMixin, ToolPanel):
     title = "De-identify Files"
     description = ("Anonymize / morph / pixel-blank local DICOM files to an "
                   "output folder (same engine as the Store Receiver).")
@@ -432,6 +456,7 @@ class DeidentifyPanel(ToolPanel):
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
+        self._workers_control(btnbar)
 
         self.runner = BatchRunner(self, verb="written")
         self.runner.build(self.body).grid(row=3, column=0, sticky="nsew",
@@ -546,7 +571,8 @@ class DeidentifyPanel(ToolPanel):
             return fileops.deidentify_files(
                 files, cfg, out, base_dir=base, progress=self.progress,
                 on_item=self.runner.on_item,
-                should_cancel=lambda: self.runner.cancelled)
+                should_cancel=lambda: self.runner.cancelled,
+                workers=self._get_workers())
 
         def on_done():
             self.btn.configure(state="normal")

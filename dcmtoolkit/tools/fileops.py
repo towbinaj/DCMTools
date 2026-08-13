@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import csv
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
@@ -25,6 +27,22 @@ Progress = Callable[[str], None]
 
 def _noop(_: str) -> None:
     pass
+
+
+def _run_pool(files, fn, workers: int, stop: dict) -> None:
+    """Run ``fn(file)`` over files, sequentially or across a thread pool.
+
+    ``fn`` is responsible for its own thread-safe bookkeeping. ``stop`` is a
+    ``{"v": bool}`` cancel flag checked between items in the sequential path.
+    """
+    if workers and workers > 1 and len(files) > 1:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(fn, files))
+    else:
+        for f in files:
+            if stop.get("v"):
+                break
+            fn(f)
 
 
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -115,13 +133,21 @@ def _parse_tag(tag: str) -> Tag:
 def modify_files(files: Iterable[Path], ops: list[ModifyOp],
                  in_place: bool = False, out_dir: Path | None = None,
                  progress: Progress = _noop,
-                 on_item=None, should_cancel=None) -> ModifyResult:
+                 on_item=None, should_cancel=None,
+                 workers: int = 1) -> ModifyResult:
     result = ModifyResult()
     files = [Path(f) for f in files]
     total = len(files)
-    for i, f in enumerate(files, 1):
+    lock = threading.Lock()
+    counter = {"n": 0}
+    stop = {"v": False}
+
+    def process(f):
+        if stop["v"]:
+            return
         if should_cancel is not None and should_cancel():
-            break
+            stop["v"] = True
+            return
         ok, detail = False, "ok"
         try:
             ds = dcmread(str(f), force=True)
@@ -144,15 +170,22 @@ def modify_files(files: Iterable[Path], ops: list[ModifyOp],
                 base.mkdir(parents=True, exist_ok=True)
                 dest = base / f.name
             ds.save_as(str(dest))
-            result.changed += 1
             ok = True
+            with lock:
+                result.changed += 1
         except Exception as exc:  # noqa: BLE001 - never abort the batch
-            result.failed += 1
-            if len(result.errors) < 5000:
-                result.errors.append(f"{f}: {exc}")
-            detail = str(exc)
+            detail = str(exc).strip().replace("\n", " ")[:200] or "error"
+            with lock:
+                result.failed += 1
+                if len(result.errors) < 5000:
+                    result.errors.append(f"{f}: {exc}")
+        with lock:
+            counter["n"] += 1
+            n = counter["n"]
         if on_item:
-            on_item(i, total, f, ok, detail)
+            on_item(n, total, f, ok, detail)
+
+    _run_pool(files, process, workers, stop)
     return result
 
 
@@ -177,16 +210,23 @@ class SplitResult:
 
 def split_multiframe(files: Iterable[Path], out_dir: Path,
                      progress: Progress = _noop,
-                     on_item=None, should_cancel=None) -> SplitResult:
+                     on_item=None, should_cancel=None,
+                     workers: int = 1) -> SplitResult:
     result = SplitResult()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     files = [Path(x) for x in files]
     total = len(files)
+    lock = threading.Lock()
+    counter = {"n": 0}
+    stop = {"v": False}
 
-    for i, f in enumerate(files, 1):
+    def process(f):
+        if stop["v"]:
+            return
         if should_cancel is not None and should_cancel():
-            break
+            stop["v"] = True
+            return
         ok, detail = True, "ok"
         try:
             ds = dcmread(str(f), force=True)
@@ -194,34 +234,41 @@ def split_multiframe(files: Iterable[Path], out_dir: Path,
                 raise ValueError("not a DICOM object (missing SOP UID)")
             n = int(getattr(ds, "NumberOfFrames", 1) or 1)
             if n <= 1:
-                result.skipped += 1
-                detail = "single frame"
-                if on_item:
-                    on_item(i, total, f, True, "skipped (single frame)")
-                continue
-            pixels = ds.pixel_array  # shape (frames, rows, cols[, samples])
-            stem = f.stem
-            for frame_idx in range(n):
-                frame = ds.copy()
-                frame.NumberOfFrames = 1
-                frame.SOPInstanceUID = generate_uid()
-                frame.InstanceNumber = frame_idx + 1
-                if hasattr(frame, "file_meta") and frame.file_meta is not None:
-                    frame.file_meta.MediaStorageSOPInstanceUID = \
-                        frame.SOPInstanceUID
-                frame.PixelData = pixels[frame_idx].tobytes()
-                dest = out_dir / f"{stem}_frame{frame_idx + 1:04d}.dcm"
-                frame.save_as(str(dest))
-                result.frames_written += 1
-            result.files_processed += 1
-            detail = f"{n} frames"
+                with lock:
+                    result.skipped += 1
+                detail = "skipped (single frame)"
+            else:
+                pixels = ds.pixel_array
+                stem = f.stem
+                for frame_idx in range(n):
+                    frame = ds.copy()
+                    frame.NumberOfFrames = 1
+                    frame.SOPInstanceUID = generate_uid()
+                    frame.InstanceNumber = frame_idx + 1
+                    if getattr(frame, "file_meta", None) is not None:
+                        frame.file_meta.MediaStorageSOPInstanceUID = \
+                            frame.SOPInstanceUID
+                    frame.PixelData = pixels[frame_idx].tobytes()
+                    dest = out_dir / f"{stem}_frame{frame_idx + 1:04d}.dcm"
+                    frame.save_as(str(dest))
+                    with lock:
+                        result.frames_written += 1
+                with lock:
+                    result.files_processed += 1
+                detail = f"{n} frames"
         except Exception as exc:  # noqa: BLE001 - never abort the batch
             ok = False
-            if len(result.errors) < 5000:
-                result.errors.append(f"{f}: {exc}")
-            detail = str(exc)
+            detail = str(exc).strip().replace("\n", " ")[:200] or "error"
+            with lock:
+                if len(result.errors) < 5000:
+                    result.errors.append(f"{f}: {exc}")
+        with lock:
+            counter["n"] += 1
+            n2 = counter["n"]
         if on_item:
-            on_item(i, total, f, ok, detail)
+            on_item(n2, total, f, ok, detail)
+
+    _run_pool(files, process, workers, stop)
     return result
 
 
@@ -245,14 +292,22 @@ class DumpResult:
 
 def dump_files(files: Iterable[Path], fields: list[str] | None = None,
                progress: Progress = _noop,
-               on_item=None, should_cancel=None) -> DumpResult:
+               on_item=None, should_cancel=None,
+               workers: int = 1) -> DumpResult:
     fields = fields or DUMP_FIELDS
     result = DumpResult()
     files = [Path(f) for f in files]
     total = len(files)
-    for i, f in enumerate(files, 1):
+    lock = threading.Lock()
+    counter = {"n": 0}
+    stop = {"v": False}
+
+    def process(f):
+        if stop["v"]:
+            return
         if should_cancel is not None and should_cancel():
-            break
+            stop["v"] = True
+            return
         ok, detail = True, "ok"
         try:
             ds = dcmread(str(f), force=True, stop_before_pixels=True)
@@ -261,15 +316,22 @@ def dump_files(files: Iterable[Path], fields: list[str] | None = None,
             row = {"File": str(f)}
             for fld in fields:
                 row[fld] = str(getattr(ds, fld, ""))
-            result.rows.append(row)
-            result.files_read += 1
+            with lock:
+                result.rows.append(row)
+                result.files_read += 1
         except Exception as exc:  # noqa: BLE001 - never abort the batch
             ok = False
-            if len(result.errors) < 5000:
-                result.errors.append(f"{f}: {exc}")
-            detail = str(exc)
+            detail = str(exc).strip().replace("\n", " ")[:200] or "error"
+            with lock:
+                if len(result.errors) < 5000:
+                    result.errors.append(f"{f}: {exc}")
+        with lock:
+            counter["n"] += 1
+            n = counter["n"]
         if on_item:
-            on_item(i, total, f, ok, detail)
+            on_item(n, total, f, ok, detail)
+
+    _run_pool(files, process, workers, stop)
     progress(f"Read {result.files_read:,} file(s), {len(result.errors):,} "
              "error(s).")
     return result
@@ -307,12 +369,14 @@ class DeidentResult:
 def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
                      base_dir: Path | None = None,
                      progress: Progress = _noop,
-                     on_item=None, should_cancel=None) -> DeidentResult:
+                     on_item=None, should_cancel=None,
+                     workers: int = 1) -> DeidentResult:
     """Apply the anonymize/morph/pixel-blank Processor to files, saving copies.
 
     ``cfg`` is a ``store.processing.ReceiverConfig``. Output structure mirrors
     the input relative to ``base_dir`` when given, else files land flat in
-    ``out_dir`` (name collisions get a numeric suffix).
+    ``out_dir`` (name collisions get a numeric suffix). ``workers`` > 1 runs the
+    files through a thread pool (the Processor's UID remap is locked).
     """
     from ..store.processing import Processor  # lazy: avoids import cycle
 
@@ -323,10 +387,16 @@ def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
     proc = Processor(cfg)
     result = DeidentResult()
     used: set[Path] = set()
+    lock = threading.Lock()
+    counter = {"n": 0}
+    stop = {"v": False}
 
-    for i, f in enumerate(files, 1):
+    def process(f):
+        if stop["v"]:
+            return
         if should_cancel is not None and should_cancel():
-            break
+            stop["v"] = True
+            return
         ok, detail = False, "ok"
         try:
             ds = dcmread(str(f), force=True)
@@ -341,19 +411,27 @@ def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
                 dest = out_dir / rel
             else:
                 dest = out_dir / f.name
-            while dest in used or dest.resolve() == f.resolve():
-                dest = dest.with_stem(dest.stem + "_1")
+            with lock:
+                while dest in used or dest.resolve() == f.resolve():
+                    dest = dest.with_stem(dest.stem + "_1")
+                used.add(dest)
             dest.parent.mkdir(parents=True, exist_ok=True)
             ds.save_as(str(dest), enforce_file_format=True)
-            used.add(dest)
-            result.written += 1
             ok, detail = True, dest.name
+            with lock:
+                result.written += 1
         except Exception as exc:  # noqa: BLE001 - never abort the batch
-            result.failed += 1
-            if len(result.errors) < 5000:
-                result.errors.append(f"{f}: {exc}")
-            detail = str(exc)
+            detail = str(exc).strip().replace("\n", " ")[:200] or "error"
+            with lock:
+                result.failed += 1
+                if len(result.errors) < 5000:
+                    result.errors.append(f"{f}: {exc}")
+        with lock:
+            counter["n"] += 1
+            n = counter["n"]
         if on_item:
-            on_item(i, total, f, ok, detail)
+            on_item(n, total, f, ok, detail)
+
+    _run_pool(files, process, workers, stop)
     progress(f"Done. Wrote {result.written:,}, failed {result.failed:,}.")
     return result

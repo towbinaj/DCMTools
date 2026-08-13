@@ -12,6 +12,7 @@ Implements the legacy DCMStoreService [ANONYMIZE] and [MORPH] behavior:
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -79,6 +80,7 @@ class Processor:
     def __init__(self, cfg: ReceiverConfig):
         self.cfg = cfg
         self._uid_map: dict[str, str] = {}
+        self._uid_lock = threading.Lock()
         self._anon_rules = self._load_anon_rules()
         self._morph_format = self._load_morph_format()
         self._morph_table = self._load_morph_table()
@@ -196,9 +198,12 @@ class Processor:
             ds.PatientBirthDate = BASELINE.strftime("%Y%m%d")
 
     def _remap(self, uid: str) -> str:
-        if uid not in self._uid_map:
-            self._uid_map[uid] = generate_uid()
-        return self._uid_map[uid]
+        # Locked: parallel de-identify workers share one Processor so that the
+        # same source UID always maps to the same new UID within a study.
+        with self._uid_lock:
+            if uid not in self._uid_map:
+                self._uid_map[uid] = generate_uid()
+            return self._uid_map[uid]
 
     def _remap_uids(self, ds: Dataset) -> None:
         for attr in ("StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"):
