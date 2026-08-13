@@ -19,7 +19,7 @@ from ..tools import modality as modtool
 from .base import ToolPanel
 from .batch import BatchRunner
 from .theme import MUTED, mono
-from .widgets import DestinationPicker, build_drop_zone, run_threaded, section, PAD
+from .widgets import DestinationPicker, build_drop_zone, run_threaded, PAD
 
 
 class ModalitySCUPanel(ToolPanel):
@@ -32,31 +32,31 @@ class ModalitySCUPanel(ToolPanel):
         self.files: list[Path] = []
         self._items: list[dict] = []
 
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=0)
-        self.log.configure(height=70)
+        # Give the tabbed body most of the height; keep the log a short strip.
+        self.grid_rowconfigure(1, weight=5)
+        self.grid_rowconfigure(2, weight=1)
+        self.log.configure(height=64)
         self.body.grid_configure(sticky="nsew")
         self.body.grid_columnconfigure(0, weight=1)
-        self.body.grid_rowconfigure(3, weight=1)   # results expand
+        self.body.grid_rowconfigure(0, weight=1)
 
-        # --- servers ---
-        conn = ctk.CTkFrame(self.body, fg_color="transparent")
-        conn.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
-        conn.grid_columnconfigure(0, weight=1)
-        conn.grid_columnconfigure(1, weight=1)
-        self.ris = DestinationPicker(conn, self.app, label="Worklist / MPPS server",
+        # The workflow is two phases, so split it into tabs - this gives the
+        # worklist results (and the exam/progress area) the full panel height.
+        self.tabs = ctk.CTkTabview(self.body)
+        self.tabs.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
+        wl = self.tabs.add("1. Worklist")
+        ex = self.tabs.add("2. Perform exam")
+
+        # ===== Tab 1: worklist query + results =====
+        wl.grid_columnconfigure(0, weight=1)
+        wl.grid_rowconfigure(2, weight=1)     # results expand
+        self.ris = DestinationPicker(wl, self.app, label="Worklist / MPPS server",
                                      remember_key="ModalityRIS",
                                      groups=[DEST_GROUP_WORKLIST])
-        self.ris.grid(row=0, column=0, sticky="ew", padx=(0, PAD))
-        self.pacs = DestinationPicker(conn, self.app, label="Send images to (PACS)",
-                                      remember_key="ModalityPACS")
-        self.pacs.grid(row=0, column=1, sticky="ew")
+        self.ris.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
 
-        # --- worklist query ---
-        section(self.body, "1. Query worklist").grid(
-            row=1, column=0, sticky="w", padx=PAD, pady=(PAD, 0))
-        q = ctk.CTkFrame(self.body)
-        q.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(2, PAD))
+        q = ctk.CTkFrame(wl)
+        q.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
         for c in range(6):
             q.grid_columnconfigure(c, weight=1 if c in (1, 3, 5) else 0)
         today = datetime.now().strftime("%Y%m%d")
@@ -86,27 +86,35 @@ class ModalitySCUPanel(ToolPanel):
         self.query_status = ctk.CTkLabel(qbar, text="", text_color=MUTED)
         self.query_status.pack(side="left", padx=PAD)
 
-        # --- results ---
         self.results = ctk.CTkScrollableFrame(
-            self.body, label_text="Scheduled procedure steps (pick one)")
-        self.results.grid(row=3, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
+            wl, label_text="Scheduled procedure steps (pick one, then open "
+                            "'2. Perform exam')")
+        self.results.grid(row=2, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
         self.results.grid_columnconfigure(0, weight=1)
         self._sel = ctk.IntVar(value=-1)
 
-        # --- exam images ---
-        section(self.body, "2. Exam images to acquire").grid(
-            row=4, column=0, sticky="w", padx=PAD)
+        # ===== Tab 2: perform the exam =====
+        ex.grid_columnconfigure(0, weight=1)
+        ex.grid_rowconfigure(5, weight=1)     # runner expands
+        self.sel_banner = ctk.CTkLabel(
+            ex, text="No worklist item selected - pick one on the Worklist tab.",
+            anchor="w", justify="left", text_color=MUTED,
+            font=ctk.CTkFont(size=14, weight="bold"))
+        self.sel_banner.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 2))
+
+        self.pacs = DestinationPicker(ex, self.app, label="Send images to (PACS)",
+                                      remember_key="ModalityPACS")
+        self.pacs.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
+
         zone, self.count_lbl = build_drop_zone(
-            self.app, self.body, self._on_drop, "Perform exam",
+            self.app, ex, self._on_drop, "Perform exam",
             [("Load Folder...", self._load_folder, 130),
              ("Load Files...", self._load_files, 120),
              ("Clear", self._clear_files, 70)])
-        zone.grid(row=5, column=0, sticky="ew", padx=PAD, pady=(2, PAD))
+        zone.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
 
-        # --- perform ---
-        section(self.body, "3. Perform").grid(row=6, column=0, sticky="w", padx=PAD)
-        opt = ctk.CTkFrame(self.body, fg_color="transparent")
-        opt.grid(row=7, column=0, sticky="ew", padx=PAD, pady=(2, 0))
+        opt = ctk.CTkFrame(ex, fg_color="transparent")
+        opt.grid(row=3, column=0, sticky="ew", padx=PAD)
         self.opt_mpps = ctk.CTkCheckBox(opt, text="Send MPPS (In Progress / Completed)")
         self.opt_mpps.select()
         self.opt_mpps.pack(side="left")
@@ -118,8 +126,8 @@ class ModalitySCUPanel(ToolPanel):
                                              width=140)
         self.mpps_status.pack(side="left")
 
-        runbar = ctk.CTkFrame(self.body, fg_color="transparent")
-        runbar.grid(row=8, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
+        runbar = ctk.CTkFrame(ex, fg_color="transparent")
+        runbar.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))
         self.perform_btn = ctk.CTkButton(runbar, text="Perform exam",
                                          command=self._perform)
         self.perform_btn.pack(side="left")
@@ -134,8 +142,8 @@ class ModalitySCUPanel(ToolPanel):
         self.workers.pack(side="left")
 
         self.runner = BatchRunner(self, verb="sent")
-        self.runner.build(self.body).grid(row=9, column=0, sticky="nsew",
-                                          padx=PAD, pady=(PAD, PAD))
+        self.runner.build(ex).grid(row=5, column=0, sticky="nsew",
+                                   padx=PAD, pady=(PAD, PAD))
 
     def on_destinations_changed(self) -> None:
         self.ris.refresh()
@@ -192,6 +200,9 @@ class ModalitySCUPanel(ToolPanel):
         for w in self.results.winfo_children():
             w.destroy()
         self._sel.set(-1)
+        self.sel_banner.configure(
+            text="No worklist item selected - pick one on the Worklist tab.",
+            text_color=MUTED)
         if not self._items:
             ctk.CTkLabel(self.results, text="No worklist items.",
                          text_color=MUTED).grid(sticky="w", padx=4, pady=4)
@@ -208,7 +219,8 @@ class ModalitySCUPanel(ToolPanel):
                     f"{it['AccessionNumber'][:12]:12} "
                     f"{it['RequestedProcedureDescription']}")
             ctk.CTkRadioButton(self.results, text=line, font=mono(11),
-                               variable=self._sel, value=i).grid(
+                               variable=self._sel, value=i,
+                               command=self._on_pick).grid(
                 sticky="w", padx=4, pady=1)
 
     def _selected_item(self) -> dict | None:
@@ -216,6 +228,16 @@ class ModalitySCUPanel(ToolPanel):
         if 0 <= i < len(self._items):
             return self._items[i]
         return None
+
+    def _on_pick(self) -> None:
+        it = self._selected_item()
+        if it:
+            self.sel_banner.configure(
+                text=f"Selected:  {it.get('PatientName','?')}   ·   "
+                     f"{it.get('PatientID','')}   ·   Acc {it.get('AccessionNumber','')}"
+                     f"   ·   {it.get('Modality','')}   ·   "
+                     f"{it.get('RequestedProcedureDescription','')}",
+                text_color=("#2e8b57", "#43c59e"))
 
     # -- exam images -----------------------------------------------------
     def _load_files(self) -> None:
