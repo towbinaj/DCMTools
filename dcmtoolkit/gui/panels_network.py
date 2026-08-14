@@ -69,57 +69,171 @@ class EchoAllPanel(ToolPanel):
     description = ("Ping every saved destination with C-ECHO and show which are "
                   "reachable.")
 
+    _COLS = [("name", "Destination"), ("ae", "AE Title"),
+             ("host", "Host : Port"), ("group", "Group"),
+             ("status", "Status"), ("lat", "Latency")]
+
     def build(self) -> None:
+        self._sort_col = "name"
+        self._sort_desc = False
+        self._filter = "All"
+        self._results: dict[str, dict] = {}
+        self._cells: dict[str, tuple] = {}
+
+        # Body fills the panel; the log row is hidden so it must not keep a
+        # weighted (empty) row, which is what left the big blank area below.
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(1, weight=1)
+        self.log.grid_remove()
+
         bar = ctk.CTkFrame(self.body, fg_color="transparent")
         bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        self.test_btn = ctk.CTkButton(bar, text="Test All",
+        self.test_btn = ctk.CTkButton(bar, text="Test All", width=100,
                                       command=self._test_all)
         self.test_btn.pack(side="left")
+        ctk.CTkLabel(bar, text="Show").pack(side="left", padx=(PAD, 4))
+        self.filter_btn = ctk.CTkSegmentedButton(
+            bar, values=["All", "OK", "Fail"], command=self._on_filter)
+        self.filter_btn.set("All")
+        self.filter_btn.pack(side="left")
         self.summary = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.summary.pack(side="left", padx=PAD)
 
-        self.table = ctk.CTkScrollableFrame(self.body, height=340)
-        self.table.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
-        self.table.grid_columnconfigure(0, weight=1)
-        self.body.grid_rowconfigure(1, weight=1)
-        self.body.grid_columnconfigure(0, weight=1)
-        # Hide the log box; the table is the output.
-        self.log.grid_remove()
+        self.table = ctk.CTkScrollableFrame(self.body)
+        self.table.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
+        self.table.grid_columnconfigure(0, weight=3, minsize=180)  # name
+        self.table.grid_columnconfigure(1, weight=2, minsize=130)  # AE
+        self.table.grid_columnconfigure(2, weight=2, minsize=160)  # host:port
+        self.table.grid_columnconfigure(3, weight=1, minsize=120)  # group
+        self.table.grid_columnconfigure(4, weight=1, minsize=110)  # status
+        self.table.grid_columnconfigure(5, weight=1, minsize=90)   # latency
 
-        self._rows: dict[str, ctk.CTkLabel] = {}
-        self._build_rows()
+        self._sync_results()
 
     def on_destinations_changed(self) -> None:
-        self._build_rows()
-
-    def _build_rows(self) -> None:
-        for child in self.table.winfo_children():
-            child.destroy()
-        self._rows = {}
-        hdr = ctk.CTkFrame(self.table, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew")
-        hdr.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(hdr, text="Destination", anchor="w",
-                     font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, sticky="w")
-        ctk.CTkLabel(hdr, text="Status", width=160, anchor="w",
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=1)
-        for i, node in enumerate(self.app.destinations, start=1):
-            fr = ctk.CTkFrame(self.table, fg_color="transparent")
-            fr.grid(row=i, column=0, sticky="ew", pady=1)
-            fr.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(fr, text=f"{node.name}  ({node.aetitle}@{node.host}:"
-                                  f"{node.port})", anchor="w").grid(
-                row=0, column=0, sticky="w")
-            status = ctk.CTkLabel(fr, text="—", width=160, anchor="w",
-                                  text_color=MUTED)
-            status.grid(row=0, column=1)
-            self._rows[self._key(node)] = status
+        self._sync_results()
 
     @staticmethod
     def _key(node) -> str:
         return f"{node.aetitle}@{node.host}:{node.port}"
 
+    def _sync_results(self) -> None:
+        """Rebuild the results map from destinations, keeping prior statuses."""
+        old = self._results
+        self._results = {}
+        for node in self.app.destinations:
+            k = self._key(node)
+            r = old.get(k) or {"status": "—", "ms": None, "ok": None}
+            r["node"] = node
+            self._results[k] = r
+        self._render_table()
+
+    # -- sorting / filtering --------------------------------------------
+    def _sort_by(self, col: str) -> None:
+        if self._sort_col == col:
+            self._sort_desc = not self._sort_desc
+        else:
+            self._sort_col, self._sort_desc = col, False
+        self._render_table()
+
+    def _on_filter(self, value: str) -> None:
+        self._filter = value
+        self._render_table()
+
+    def _passes_filter(self, r: dict) -> bool:
+        if self._filter == "OK":
+            return r["ok"] is True
+        if self._filter == "Fail":
+            return r["ok"] is False
+        return True
+
+    def _sort_key(self, r: dict):
+        node = r["node"]
+        col = self._sort_col
+        if col == "ae":
+            return node.aetitle.lower()
+        if col == "host":
+            return (node.host, node.port)
+        if col == "group":
+            return (node.group or "").lower()
+        if col == "status":
+            # OK first (asc), then failures, then untested.
+            return 0 if r["ok"] else (1 if r["ok"] is False else 2)
+        if col == "lat":
+            return r["ms"] if r["ms"] is not None else 1 << 30
+        return node.name.lower()
+
+    @staticmethod
+    def _status_color(r: dict):
+        if r["ok"] is True:
+            return "#2a2"
+        if r["ok"] is False:
+            return "#d33"
+        return MUTED
+
+    def _render_table(self) -> None:
+        for w in self.table.winfo_children():
+            w.destroy()
+        self._cells = {}
+
+        for ci, (ckey, ctext) in enumerate(self._COLS):
+            arrow = ("  ▼" if self._sort_desc else "  ▲") \
+                if self._sort_col == ckey else ""
+            ctk.CTkButton(
+                self.table, text=ctext + arrow, anchor="w", height=28,
+                fg_color=("gray82", "gray26"), text_color=("gray10", "gray90"),
+                hover_color=("gray72", "gray34"),
+                font=ctk.CTkFont(weight="bold"),
+                command=lambda k=ckey: self._sort_by(k)).grid(
+                row=0, column=ci, sticky="ew", padx=1, pady=(0, 2))
+
+        rows = [r for r in self._results.values() if self._passes_filter(r)]
+        rows.sort(key=self._sort_key, reverse=self._sort_desc)
+        if not rows:
+            msg = ("No destinations - add some in Settings."
+                   if not self._results else
+                   f"No destinations match '{self._filter}'.")
+            ctk.CTkLabel(self.table, text=msg, text_color=MUTED).grid(
+                row=1, column=0, columnspan=len(self._COLS), sticky="w",
+                padx=6, pady=6)
+            return
+        for i, r in enumerate(rows, start=1):
+            node = r["node"]
+            ctk.CTkLabel(self.table, text=node.name, anchor="w").grid(
+                row=i, column=0, sticky="ew", padx=4, pady=1)
+            ctk.CTkLabel(self.table, text=node.aetitle, anchor="w",
+                         text_color=MUTED).grid(row=i, column=1, sticky="ew",
+                                                padx=4)
+            ctk.CTkLabel(self.table, text=f"{node.host}:{node.port}",
+                         anchor="w", text_color=MUTED).grid(
+                row=i, column=2, sticky="ew", padx=4)
+            ctk.CTkLabel(self.table, text=node.group or "", anchor="w",
+                         text_color=MUTED).grid(row=i, column=3, sticky="ew",
+                                                padx=4)
+            st = ctk.CTkLabel(self.table, text=r["status"], anchor="w",
+                              text_color=self._status_color(r))
+            st.grid(row=i, column=4, sticky="ew", padx=4)
+            lat = ctk.CTkLabel(
+                self.table, anchor="w", text_color=MUTED,
+                text=(f"{r['ms']} ms" if r["ms"] is not None else "—"))
+            lat.grid(row=i, column=5, sticky="ew", padx=4)
+            self._cells[self._key(node)] = (st, lat)
+
+    def _set_status(self, key: str, status: str, ms, ok) -> None:
+        r = self._results.get(key)
+        if r is None:
+            return
+        r.update(status=status, ms=ms, ok=ok)
+        cell = self._cells.get(key)
+        if cell:
+            st, lat = cell
+            st.configure(text=status, text_color=self._status_color(r))
+            lat.configure(text=f"{ms} ms" if ms is not None else "—")
+
+    # -- test ------------------------------------------------------------
     def _test_all(self) -> None:
         nodes = list(self.app.destinations)
         if not nodes:
@@ -132,10 +246,7 @@ class EchoAllPanel(ToolPanel):
 
         for node in nodes:
             key = self._key(node)
-            lbl = self._rows.get(key)
-            if lbl:
-                self.after(0, lambda l=lbl: l.configure(text="testing...",
-                                                        text_color=MUTED))
+            self._set_status(key, "testing...", None, None)
 
             def work(n=node):
                 t0 = time.time()
@@ -145,31 +256,31 @@ class EchoAllPanel(ToolPanel):
 
             def done(result, n=node, key=key):
                 res, ms = result
-                lbl = self._rows.get(key)
-                if lbl:
-                    if res.success:
-                        lbl.configure(text=f"OK  ({ms} ms)",
-                                      text_color="#2a2")
-                    else:
-                        lbl.configure(text="FAIL", text_color="#d33")
+                if res.success:
+                    self._set_status(key, "OK", ms, True)
+                else:
+                    self._set_status(key, "FAIL", None, False)
                 with lock:
                     done_count["n"] += 1
                     if res.success:
                         done_count["ok"] += 1
+                    n_done = done_count["n"]
                     self.summary.configure(
-                        text=f"Tested {done_count['n']}/{len(nodes)}  "
-                             f"({done_count['ok']} OK)")
-                    if done_count["n"] == len(nodes):
-                        self.test_btn.configure(state="normal")
+                        text=f"Tested {n_done}/{len(nodes)}  "
+                             f"({done_count['ok']} OK, "
+                             f"{n_done - done_count['ok']} fail)")
+                if n_done == len(nodes):
+                    self.test_btn.configure(state="normal")
+                    self._render_table()  # apply sort/filter to final results
 
             def err(exc, tb, key=key):
-                lbl = self._rows.get(key)
-                if lbl:
-                    lbl.configure(text="ERROR", text_color="#d33")
+                self._set_status(key, "ERROR", None, False)
                 with lock:
                     done_count["n"] += 1
-                    if done_count["n"] == len(nodes):
-                        self.test_btn.configure(state="normal")
+                    n_done = done_count["n"]
+                if n_done == len(nodes):
+                    self.test_btn.configure(state="normal")
+                    self._render_table()
 
             run_threaded(self, work, done, err)
 

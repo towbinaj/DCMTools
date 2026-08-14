@@ -126,7 +126,7 @@ def _finalize(all_nodes: list[Node], found: list[str]) -> ImportResult:
         if name_counts[n.name.lower()] > 1:
             n.name = f"{n.name} ({n.host})"
 
-    # Per-node validation warnings (e.g. the 10.1.1..29 typo).
+    # Per-node validation warnings (e.g. a malformed host like "10.0.0..5").
     warnings: list[str] = []
     for n in nodes:
         for problem in n.validate():
