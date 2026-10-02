@@ -14,7 +14,7 @@ from pydicom import dcmread
 from .. import config, paths
 from ..model import DEST_GROUP_WORKLIST
 from ..net import mwl, mpps, scu
-from ..tools.fileops import find_dicom_files
+from ..tools.fileops import expand_sources
 from ..tools import modality as modtool
 from .base import ToolPanel
 from .batch import BatchRunner
@@ -264,53 +264,39 @@ class ModalitySCUPanel(ToolPanel):
                 text_color=("#2e8b57", "#43c59e"))
 
     # -- exam images -----------------------------------------------------
-    def _load_files(self) -> None:
-        from tkinter import filedialog
-        chosen = filedialog.askopenfilenames(
-            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        if chosen:
-            self.files = [Path(p) for p in chosen]
-            self._update_count()
-
-    def _load_folder(self) -> None:
-        from tkinter import filedialog
-        folder = filedialog.askdirectory()
-        if not folder:
+    def _ingest(self, paths) -> None:
+        """Expand selected/dropped paths (folders + .zip archives) to the exam
+        image list on a worker thread (replaces the current set)."""
+        paths = [Path(p) for p in paths]
+        if not paths:
             return
-        self.count_lbl.configure(text="Scanning folder...")
+        self.count_lbl.configure(text="Scanning (expanding any zips)...")
 
         def work():
-            return find_dicom_files(Path(folder))
+            return expand_sources(paths)
 
         def done(found):
             self.files = list(found)
-            self.log.write(f"Loaded {len(found):,} exam image(s) from {folder}")
+            self.log.write(f"Loaded {len(found):,} exam image(s).")
             self._update_count()
 
         run_threaded(self, work, done)
 
+    def _load_files(self) -> None:
+        from tkinter import filedialog
+        chosen = filedialog.askopenfilenames(
+            filetypes=[("DICOM / Zip", "*.dcm *.dic *.ima *.zip"),
+                       ("All files", "*.*")])
+        self._ingest(chosen)
+
+    def _load_folder(self) -> None:
+        from tkinter import filedialog
+        folder = filedialog.askdirectory()
+        if folder:
+            self._ingest([folder])
+
     def _on_drop(self, dropped: list) -> None:
-        chosen = [Path(p) for p in dropped]
-        loose = [p for p in chosen if p.is_file()]
-        folders = [p for p in chosen if p.is_dir()]
-        if folders:
-            self.count_lbl.configure(text="Scanning dropped folder(s)...")
-
-            def work():
-                out = list(loose)
-                for d in folders:
-                    out.extend(find_dicom_files(d))
-                return out
-
-            def done(found):
-                self.files = list(found)
-                self.log.write(f"Loaded {len(found):,} exam image(s).")
-                self._update_count()
-
-            run_threaded(self, work, done)
-        else:
-            self.files = loose
-            self._update_count()
+        self._ingest(dropped)
 
     def _clear_files(self) -> None:
         self.files = []

@@ -14,7 +14,7 @@ from pydicom import dcmread
 
 from .. import config, paths
 from ..net import scu
-from ..tools.fileops import find_dicom_files
+from ..tools.fileops import find_dicom_files, expand_sources
 from .base import ToolPanel
 from .batch import BatchRunner
 from .theme import MUTED
@@ -334,52 +334,39 @@ class SendPanel(ToolPanel):
     def _cancel(self) -> None:
         self.runner.cancel()
 
-    def _add_files(self) -> None:
-        chosen = filedialog.askopenfilenames(
-            title="Select DICOM files",
-            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        self.files.extend(Path(p) for p in chosen)
-        self._update_count()
-
-    def _add_folder(self) -> None:
-        folder = filedialog.askdirectory(title="Select folder of DICOM files")
-        if not folder:
+    def _ingest(self, paths) -> None:
+        """Expand selected/dropped paths (folders + .zip archives) to DICOM
+        files on a worker thread, then append to the queue."""
+        paths = [Path(p) for p in paths]
+        if not paths:
             return
-        self.count_lbl.configure(text=f"Scanning {folder} ...")
+        self.count_lbl.configure(text="Scanning (expanding any zips)...")
 
         def work():
-            return find_dicom_files(Path(folder))
+            return expand_sources(paths)
 
         def done(found):
+            found = list(found)
             self.files.extend(found)
-            self.log.write(f"Found {len(found):,} file(s) in {folder}")
+            self.log.write(f"Added {len(found):,} file(s).")
             self._update_count()
 
         run_threaded(self, work, done)
 
+    def _add_files(self) -> None:
+        chosen = filedialog.askopenfilenames(
+            title="Select DICOM files or a .zip",
+            filetypes=[("DICOM / Zip", "*.dcm *.dic *.ima *.zip"),
+                       ("All files", "*.*")])
+        self._ingest(chosen)
+
+    def _add_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Select folder of DICOM files")
+        if folder:
+            self._ingest([folder])
+
     def _on_drop(self, dropped: list) -> None:
-        chosen = [Path(p) for p in dropped]
-        loose = [p for p in chosen if p.is_file()]
-        self.files.extend(loose)
-        folders = [p for p in chosen if p.is_dir()]
-        if loose:
-            self.log.write(f"Added {len(loose):,} dropped file(s).")
-        if folders:
-            self.count_lbl.configure(text="Scanning dropped folder(s)...")
-
-            def work():
-                # Return per-folder file lists so we can report each one.
-                return [(d, find_dicom_files(d)) for d in folders]
-
-            def done(results):
-                for d, found in results:
-                    self.files.extend(found)
-                    self.log.write(f"  + {d.name}:  {len(found):,} file(s)")
-                self._update_count()
-
-            run_threaded(self, work, done)
-        else:
-            self._update_count()
+        self._ingest(dropped)
 
     def _clear(self) -> None:
         self.files = []

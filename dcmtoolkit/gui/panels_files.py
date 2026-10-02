@@ -127,62 +127,41 @@ class _DropSourceMixin:
         self.log.clear()
         self._update_count()
 
-    def _add_files(self):
-        chosen = filedialog.askopenfilenames(
-            filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
-        picked = [Path(p) for p in chosen]
-        if not picked:
+    def _ingest(self, paths) -> None:
+        """Expand dropped/selected paths (folders + .zip archives) to DICOM
+        files on a worker thread, then replace or append the queue."""
+        paths = [Path(p) for p in paths]
+        if not paths:
             return
         self._begin_load()
-        self.files = picked if self.LOAD_REPLACES else self.files + picked
-        self._update_count()
-
-    def _add_folder(self):
-        folder = filedialog.askdirectory()
-        if not folder:
-            return
-        self._begin_load()
-        self.count_lbl.configure(text="Scanning folder...")
+        replace = self.LOAD_REPLACES
+        base = [] if replace else list(self.files)
+        self.count_lbl.configure(text="Scanning (expanding any zips)...")
 
         def work():
-            return fileops.find_dicom_files(Path(folder))
+            return fileops.expand_sources(paths)
 
         def done(found):
             found = list(found)
-            self.files = found if self.LOAD_REPLACES else self.files + found
-            self.log.write(f"{self._verbed} {len(found):,} file(s) from {folder}")
+            self.files = found if replace else base + found
+            self.log.write(f"{self._verbed} {len(found):,} file(s).")
             self._update_count()
 
         run_threaded(self, work, done)
 
+    def _add_files(self):
+        chosen = filedialog.askopenfilenames(
+            filetypes=[("DICOM / Zip", "*.dcm *.dic *.ima *.zip"),
+                       ("All files", "*.*")])
+        self._ingest(chosen)
+
+    def _add_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self._ingest([folder])
+
     def _on_drop(self, dropped: list):
-        chosen = [Path(p) for p in dropped]
-        loose = [p for p in chosen if p.is_file()]
-        folders = [p for p in chosen if p.is_dir()]
-        self._begin_load()
-        # Start from an empty set (replace) or the current set (append).
-        base = [] if self.LOAD_REPLACES else list(self.files)
-        base.extend(loose)
-        if loose:
-            self.log.write(f"{self._verbed} {len(loose):,} dropped file(s).")
-        if folders:
-            self.count_lbl.configure(text="Scanning dropped folder(s)...")
-
-            def work():
-                return [(d, fileops.find_dicom_files(d)) for d in folders]
-
-            def done(results):
-                acc = list(base)
-                for d, found in results:
-                    acc.extend(found)
-                    self.log.write(f"  + {d.name}:  {len(found):,} file(s)")
-                self.files = acc
-                self._update_count()
-
-            run_threaded(self, work, done)
-        else:
-            self.files = base
-            self._update_count()
+        self._ingest(dropped)
 
     def _update_count(self):
         self.files = list(dict.fromkeys(self.files))

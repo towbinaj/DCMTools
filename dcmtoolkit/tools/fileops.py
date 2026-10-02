@@ -6,9 +6,13 @@ and DumpExamData executables. All are pure-pydicom and need no network.
 
 from __future__ import annotations
 
+import atexit
 import csv
 import re
+import shutil
+import tempfile
 import threading
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +70,109 @@ def find_dicom_files(root: Path, recursive: bool = True) -> list[Path]:
         if p.suffix.lower() in (".dcm", ".dic", ".ima", ""):
             files.append(p)
     return files
+
+
+# ---------------------------------------------------------------------------
+# Zip support: dropping/loading a .zip auto-extracts its DICOM files to a temp
+# folder (cleaned up on exit) so every file tool can send/scan straight from it.
+# ---------------------------------------------------------------------------
+_DICOM_SUFFIXES = (".dcm", ".dic", ".ima", "")
+_extract_root: Path | None = None
+_extract_lock = threading.Lock()
+
+
+def _get_extract_root() -> Path:
+    global _extract_root
+    with _extract_lock:
+        if _extract_root is None or not _extract_root.exists():
+            _extract_root = Path(tempfile.mkdtemp(prefix="dcmtoolkit_zip_"))
+            atexit.register(lambda: shutil.rmtree(_extract_root,
+                                                  ignore_errors=True))
+        return _extract_root
+
+
+def _is_dicom_file(p: Path) -> bool:
+    """True if the file has the DICM magic at offset 128 (preamble)."""
+    try:
+        with open(p, "rb") as fh:
+            fh.seek(128)
+            return fh.read(4) == b"DICM"
+    except OSError:
+        return False
+
+
+def extract_zip_dicoms(zip_path: Path) -> list[Path]:
+    """Extract the DICOM members of a .zip to a temp dir; return their paths.
+
+    Members are kept when they look like DICOM (``.dcm/.dic/.ima``/no extension)
+    or carry the DICM magic. Nested zips are expanded too. Entries that would
+    escape the output dir (zip-slip) are skipped.
+    """
+    zip_path = Path(zip_path)
+    base = _get_extract_root() / zip_path.stem
+    out_dir, n = base, 1
+    while out_dir.exists():
+        out_dir = Path(f"{base}_{n}")
+        n += 1
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_root = out_dir.resolve()
+
+    extracted: list[Path] = []
+    nested: list[Path] = []
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                target = (out_dir / info.filename).resolve()
+                if out_root not in target.parents and target != out_root:
+                    continue  # zip-slip guard
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                if target.suffix.lower() == ".zip":
+                    nested.append(target)
+                else:
+                    extracted.append(target)
+    except (zipfile.BadZipFile, OSError) as exc:
+        log.warning("Could not read zip %s: %s", zip_path, exc)
+        return []
+
+    keep = [p for p in extracted
+            if p.suffix.lower() in _DICOM_SUFFIXES or _is_dicom_file(p)]
+    for z in nested:
+        keep.extend(extract_zip_dicoms(z))
+    return keep
+
+
+def expand_sources(paths: Iterable[Path], recursive: bool = True) -> list[Path]:
+    """Flatten dropped/selected paths into DICOM files.
+
+    Folders are scanned (and any ``.zip`` inside them extracted); a ``.zip``
+    file is extracted; any other file is passed through (the tool validates it
+    at send/read time). Order-preserving and de-duplicated.
+    """
+    out: list[Path] = []
+    for raw in paths:
+        p = Path(raw)
+        if p.is_dir():
+            out.extend(find_dicom_files(p, recursive))
+            zips = p.rglob("*.zip") if recursive else p.glob("*.zip")
+            for z in zips:
+                out.extend(extract_zip_dicoms(z))
+        elif p.is_file():
+            if p.suffix.lower() == ".zip":
+                out.extend(extract_zip_dicoms(p))
+            else:
+                out.append(p)
+    seen: set[str] = set()
+    result: list[Path] = []
+    for f in out:
+        k = str(f)
+        if k not in seen:
+            seen.add(k)
+            result.append(f)
+    return result
 
 
 # ---------------------------------------------------------------------------
