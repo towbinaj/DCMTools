@@ -62,7 +62,7 @@ def _short(uid: str) -> str:
 
 
 def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
-            conformance: bool = False) -> QAResult:
+            conformance: bool = False, sendability: bool = False) -> QAResult:
     files = [Path(f) for f in files]
     total = len(files)
     records: list[dict] = []
@@ -210,5 +210,19 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
                 "mismatch", f"Folder mixes {len(series)} series: "
                 f"{Path(fo).name}",
                 "; ".join(_short(s) for s in list(series)[:5])))
+
+    # C-STORE send-ability: round-trip each file through a built-in standard
+    # archive to catch transfer-syntax / SOP-class problems a file-level check
+    # misses.
+    if sendability and good and not (should_cancel and should_cancel()):
+        from ..net.selftest import store_selftest
+        st = store_selftest([r["__file"] for r in good], on_item=on_item,
+                            should_cancel=should_cancel, workers=workers)
+        for r in good:
+            ok, code = st.get(str(r["__file"]), (True, "ok"))
+            if not ok:
+                findings.append(Finding(
+                    "transfer", f"{Path(r['__file']).name}: not send-able",
+                    f"C-STORE to a standard archive failed: {code}"[:500]))
 
     return QAResult(files_read=len(good), findings=findings)
