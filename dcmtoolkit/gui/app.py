@@ -146,7 +146,10 @@ class App(*_APP_BASES):
 
         def work():
             info = updater.check_latest()
-            self.after(0, lambda: self._on_update_result(info, manual))
+            try:
+                self.after(0, lambda: self._on_update_result(info, manual))
+            except RuntimeError:
+                pass   # window closed before the check returned
 
         threading.Thread(target=work, daemon=True).start()
 
