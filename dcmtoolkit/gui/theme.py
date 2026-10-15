@@ -51,6 +51,7 @@ TOOL_COLORS: dict[str, str] = {
     "TagListPanel": "#6fa8dc",       # light blue
     "ModifyPanel": "#d4a017",        # gold
     "SplitPanel": "#8e79c9",         # violet
+    "EnhancedPanel": "#5bb5a8",      # teal-green
     "DumpPanel": "#4a9ca0",          # dark teal
     "DeidentifyPanel": "#cf6f9b",    # pink
     "QAPanel": "#5cb85c",            # green

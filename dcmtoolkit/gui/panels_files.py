@@ -10,6 +10,7 @@ import customtkinter as ctk
 from .. import config
 from ..tools import fileops
 from ..tools import dicomtags
+from ..tools import enhanced
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .batch import BatchRunner
@@ -378,6 +379,86 @@ class SplitPanel(_DropSourceMixin, ToolPanel):
             self.cancel_btn.configure(state="disabled")
 
         self.runner.run(total, "split", worker, on_done=on_done,
+                        folder_totals=_folder_totals(files))
+
+
+class EnhancedPanel(_DropSourceMixin, ToolPanel):
+    title = "Enhanced -> Classic"
+    description = ("Convert Enhanced CT/MR/PET multi-frame objects to classic "
+                  "single-frame DICOM (functional groups flattened).")
+
+    def build(self) -> None:
+        self.files: list[Path] = []
+        self.out_dir: Path | None = None
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.log.configure(height=80)
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(4, weight=1)
+
+        self._make_source("Convert").grid(row=0, column=0, sticky="ew",
+                                           padx=PAD, pady=PAD)
+
+        outbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        outbar.grid(row=1, column=0, sticky="ew", padx=PAD)
+        ctk.CTkButton(outbar, text="Output folder...",
+                      command=self._pick_out).pack(side="left")
+        self.out_lbl = ctk.CTkLabel(outbar, text="(default: ./classic beside "
+                                    "each source)", text_color=MUTED)
+        self.out_lbl.pack(side="left", padx=PAD)
+
+        self.new_series = ctk.CTkCheckBox(
+            self.body, text="New Series UID for the converted series "
+            "(recommended)")
+        self.new_series.select()
+        self.new_series.grid(row=2, column=0, sticky="w", padx=PAD, pady=(PAD, 0))
+
+        btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        btnbar.grid(row=3, column=0, sticky="w", padx=PAD, pady=PAD)
+        self.btn = ctk.CTkButton(btnbar, text="Convert", command=self._run)
+        self.btn.pack(side="left")
+        self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel", width=80,
+                                        command=self._cancel, state="disabled",
+                                        fg_color="#a33", hover_color="#c44")
+        self.cancel_btn.pack(side="left", padx=PAD)
+        self._workers_control(btnbar)
+
+        self.runner = BatchRunner(self, verb="converted")
+        self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
+                                          padx=PAD, pady=(0, PAD))
+
+    def _pick_out(self) -> None:
+        folder = filedialog.askdirectory()
+        if folder:
+            self.out_dir = Path(folder)
+            self.out_lbl.configure(text=folder)
+
+    def _run(self) -> None:
+        if not self.files:
+            self.log.write("No files selected.")
+            return
+        out = self.out_dir or (self.files[0].parent / "classic")
+        files = list(self.files)
+        total = len(files)
+        new_series = bool(self.new_series.get())
+        self.btn.configure(state="disabled")
+        self.cancel_btn.configure(state="normal")
+        self.log.write(f"--- Converting {total:,} file(s) -> {out} "
+                       f"(new series: {'yes' if new_series else 'no'}) ---")
+
+        def worker():
+            return enhanced.convert_enhanced(
+                files, out, new_series=new_series,
+                on_item=self.runner.on_item,
+                should_cancel=lambda: self.runner.cancelled,
+                workers=self._get_workers())
+
+        def on_done():
+            self.btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
+
+        self.runner.run(total, "enhanced", worker, on_done=on_done,
                         folder_totals=_folder_totals(files))
 
 
