@@ -130,11 +130,6 @@ class App(*_APP_BASES):
             self.select(last if last in self._panel_classes
                         else next(iter(self._panel_classes)))
 
-        # Pre-build the other panels off-screen once the window is up, so each
-        # tab's first open is instant and never paints field-by-field.
-        self._prewarm = [k for k in self._panel_classes if k not in self.panels]
-        self.after(600, self._prewarm_step)
-
         # Quiet background update check (built exe only).
         from .. import updater
         if updater.can_self_update():
@@ -270,21 +265,6 @@ class App(*_APP_BASES):
         panel.lower()              # render behind the current panel
         self.panels[key] = panel
         return panel
-
-    def _prewarm_step(self) -> None:
-        """Build the remaining panels off-screen so a tab's first open is
-        instant (and never shows field-by-field painting). One per cycle keeps
-        the window responsive."""
-        while self._prewarm:
-            key = self._prewarm.pop(0)
-            if key not in self.panels:
-                try:
-                    self._ensure_panel(key)
-                except Exception:  # noqa: BLE001
-                    pass
-                break
-        if self._prewarm:
-            self.after(60, self._prewarm_step)
 
     def select(self, key: str) -> None:
         self._current = key
