@@ -251,8 +251,11 @@ class App(*_APP_BASES):
                 self._buttons[key] = btn
 
     def _ensure_panel(self, key: str):
-        """Build a panel off-screen (hidden) the first time it's needed, so it
-        appears in one paint when shown rather than drawing field-by-field."""
+        """Build a panel the first time it's needed. All panels are stacked in
+        the same cell; a new one is lowered behind the current so it renders
+        hidden (no flash, no field-by-field painting). Switching later is a
+        pure z-order change (tkraise) - no unmap/remap, so even heavy panels
+        like Echo-All don't re-render when you return to them."""
         panel = self.panels.get(key)
         if panel is not None:
             return panel
@@ -261,7 +264,7 @@ class App(*_APP_BASES):
             return None
         panel = cls(self.content, self)
         panel.grid(row=0, column=0, sticky="nsew")
-        panel.grid_remove()        # keep hidden until selected
+        panel.lower()              # render behind the current panel
         self.panels[key] = panel
         return panel
 
@@ -282,15 +285,12 @@ class App(*_APP_BASES):
 
     def select(self, key: str) -> None:
         self._current = key
-        if self._ensure_panel(key) is None:
+        panel = self._ensure_panel(key)
+        if panel is None:
             return
-        for k, p in self.panels.items():
-            if k == key:
-                p.grid()
-                if hasattr(p, "on_show"):
-                    p.on_show()
-            else:
-                p.grid_remove()
+        panel.tkraise()            # bring to front; no re-render of its widgets
+        if hasattr(panel, "on_show"):
+            panel.on_show()
         for k, btn in self._buttons.items():
             btn.configure(fg_color=("gray80", "gray28") if k == key
                           else "transparent")
