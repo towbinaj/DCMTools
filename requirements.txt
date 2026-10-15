@@ -1,6 +1,7 @@
 altgraph==0.17.5
 customtkinter==6.0.0
 darkdetect==0.8.0
+dicom-validator==0.9.0
 numpy==2.5.2
 packaging==26.3
 pefile==2024.8.26

@@ -18,6 +18,7 @@ from pathlib import Path
 from pydicom import dcmread
 
 from . import dicomtags
+from . import conformance as _conformance
 from .fileops import _run_pool
 
 # keyword -> VR (for the abnormal-value validation)
@@ -60,13 +61,17 @@ def _short(uid: str) -> str:
     return uid if len(uid) <= 24 else "..." + uid[-20:]
 
 
-def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1) -> QAResult:
+def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
+            conformance: bool = False) -> QAResult:
     files = [Path(f) for f in files]
     total = len(files)
     records: list[dict] = []
     lock = threading.Lock()
     counter = {"n": 0}
     stop = {"v": False}
+    # Load the standard once up front so the parallel workers don't race on it.
+    if conformance:
+        _conformance.available()
 
     def process(f):
         if stop["v"]:
@@ -88,6 +93,8 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1) -> QAResu
                 if fm is not None else ""
             if msc == "1.2.840.10008.1.3.10" or f.name.upper() == "DICOMDIR":
                 rec["__skip"] = "DICOMDIR / media directory"
+            elif conformance:
+                rec["__conf"] = _conformance.conformance_errors(ds)
         except Exception as exc:  # noqa: BLE001
             ok, detail = False, str(exc).strip()[:120]
             rec = {"__file": f, "__unreadable": detail}
@@ -129,6 +136,16 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1) -> QAResu
                 findings.append(Finding(
                     "abnormal", f"{Path(r['__file']).name}: {kw} invalid",
                     f"{kw} = {val!r}  ->  {msg}"))
+
+    # IOD conformance (dicom-validator) - only when requested
+    for r in good:
+        errs = r.get("__conf")
+        if errs:
+            name = Path(r["__file"]).name
+            findings.append(Finding(
+                "conformance",
+                f"{name}: {len(errs)} IOD conformance issue(s)",
+                "  |  ".join(errs)[:800]))
 
     # incongruent (grouped)
     def check(group_field, uniform, level):

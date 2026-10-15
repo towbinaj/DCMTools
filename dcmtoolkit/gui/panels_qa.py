@@ -10,7 +10,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
-from ..tools import qa
+from ..tools import qa, conformance
 from .base import ToolPanel
 from .panels_files import _DropSourceMixin
 from .theme import MUTED
@@ -22,9 +22,10 @@ _CAT_COLOR = {
     "missing": "#d98a5f",
     "duplicate": "#b08cd8",
     "mismatch": "#e0894a",
+    "conformance": "#7b8ce0",
 }
 _CATEGORIES = ["All", "incongruent", "abnormal", "missing", "duplicate",
-               "mismatch"]
+               "mismatch", "conformance"]
 
 
 class QAPanel(_DropSourceMixin, ToolPanel):
@@ -64,6 +65,11 @@ class QAPanel(_DropSourceMixin, ToolPanel):
                                         hover_color="#c44")
         self.cancel_btn.pack(side="left", padx=PAD)
         self._workers_control(bar)
+        self.conf_chk = ctk.CTkCheckBox(bar, text="IOD conformance")
+        self.conf_chk.pack(side="left", padx=PAD)
+        if not conformance.available():
+            self.conf_chk.configure(state="disabled",
+                                    text="IOD conformance (unavailable)")
         ctk.CTkLabel(bar, text="Show").pack(side="left", padx=(PAD, 4))
         self.filter = ctk.CTkOptionMenu(bar, values=_CATEGORIES, width=130,
                                         command=lambda _v: self._render())
@@ -152,10 +158,12 @@ class QAPanel(_DropSourceMixin, ToolPanel):
             with self._lock:
                 self._scan["i"] = i
 
+        conf = bool(self.conf_chk.get())
+
         def worker():
             return qa.qa_scan(files, on_item=on_item,
                               should_cancel=lambda: self._cancel,
-                              workers=workers)
+                              workers=workers, conformance=conf)
 
         def done(result):
             self._findings = result.findings

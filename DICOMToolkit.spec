@@ -5,6 +5,13 @@
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas = [("assets/icon.ico", "assets")]
+# Bundle the DICOM standard (parsed to JSON) so IOD conformance validation
+# works fully offline - preserve the assets/dicom-standard/<edition>/json layout.
+import os
+for _root, _dirs, _files in os.walk(os.path.join("assets", "dicom-standard")):
+    for _f in _files:
+        _src = os.path.join(_root, _f)
+        datas.append((_src, _root))
 binaries = []
 hiddenimports = []
 
@@ -19,6 +26,8 @@ for pkg in ("customtkinter", "tkinterdnd2"):
 # pynetdicom registers SOP classes dynamically; pull in all submodules.
 hiddenimports += collect_submodules("pynetdicom")
 hiddenimports += collect_submodules("pydicom")
+# dicom-validator is imported lazily for conformance checks; pull it all in.
+hiddenimports += collect_submodules("dicom_validator")
 
 # pywin32 pieces needed for the Windows service path.
 hiddenimports += [
