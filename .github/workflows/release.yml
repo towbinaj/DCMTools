@@ -1,45 +1,90 @@
-name: Build and Release
+name: Release
 
-# Push a version tag to build the exe and publish it as a GitHub Release, which
-# the in-app updater then offers to everyone:
-#   git tag v1.1.0 && git push origin v1.1.0
+# Release when YOU say so, from the commit message - no buttons, no manual tags.
+# Put a marker in a commit on main to cut a release (default bump = patch):
+#     fix wrong rescale slope [release]          -> patch  (vX.Y.Z+1)
+#     add stack splitting [release minor]        -> minor  (vX.Y+1.0)
+#     breaking: new config format [release major]-> major  (vX+1.0.0)
+# Commits without a [release] marker build nothing. A manually pushed vX.Y.Z tag
+# also still triggers a build (fallback).
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
 
 permissions:
-  contents: write        # needed to create the release
+  contents: write        # create the release + tag
 
 jobs:
-  build:
+  release:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full tag history to compute the next version
+
+      - name: Decide version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v = "$env:GITHUB_REF_NAME".TrimStart('v')
+            "do=true"       | Out-File $env:GITHUB_OUTPUT -Append
+            "version=$v"    | Out-File $env:GITHUB_OUTPUT -Append
+            "tag=v$v"       | Out-File $env:GITHUB_OUTPUT -Append
+            Write-Host "Manual tag release: v$v"
+          } else {
+            $msg = @'
+          ${{ github.event.head_commit.message }}
+          '@
+            if ($msg -match '\[release(?:\s*[: ]\s*(major|minor|patch))?\]') {
+              $bump = if ($Matches[1]) { $Matches[1] } else { 'patch' }
+              $last = (git tag --list 'v*' --sort=-v:refname | Select-Object -First 1)
+              if (-not $last) { $last = 'v0.0.0' }
+              $p = $last.TrimStart('v').Split('.')
+              $maj=[int]$p[0]; $min=[int]$p[1]; $pat=[int]$p[2]
+              switch ($bump) {
+                'major' { $maj++; $min=0; $pat=0 }
+                'minor' { $min++; $pat=0 }
+                default { $pat++ }
+              }
+              $v = "$maj.$min.$pat"
+              "do=true"    | Out-File $env:GITHUB_OUTPUT -Append
+              "version=$v" | Out-File $env:GITHUB_OUTPUT -Append
+              "tag=v$v"    | Out-File $env:GITHUB_OUTPUT -Append
+              Write-Host "Commit requests '$bump' bump: $last -> v$v"
+            } else {
+              "do=false" | Out-File $env:GITHUB_OUTPUT -Append
+              Write-Host "No [release] marker in the commit message - nothing to release."
+            }
+          }
 
       - name: Set up Python
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.14'
 
-      - name: Stamp version from tag
+      - name: Stamp version from tag/commit
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
           (Get-Content dcmtoolkit/__init__.py) `
-            -replace '__version__\s*=\s*".*"', "__version__ = `"$v`"" |
+            -replace '__version__\s*=\s*".*"', "__version__ = `"${{ steps.ver.outputs.version }}`"" |
             Set-Content dcmtoolkit/__init__.py
-          Write-Host "Building DICOM Toolkit $v"
 
       - name: Install dependencies
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Build exe
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
         run: pyinstaller DICOMToolkit.spec --noconfirm --clean
 
       - name: Compute SHA-256
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
         shell: pwsh
         run: |
           $h = (Get-FileHash dist/DICOMToolkit.exe -Algorithm SHA256).Hash.ToLower()
@@ -47,8 +92,10 @@ jobs:
           Write-Host "SHA-256: $h"
 
       - name: Publish release
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}   # created at this commit if new
           files: |
             dist/DICOMToolkit.exe
             dist/DICOMToolkit.exe.sha256

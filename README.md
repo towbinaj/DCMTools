@@ -186,19 +186,25 @@ The built exe can update itself from GitHub Releases:
 
 ### Releasing a new version (maintainer)
 
-Pushing a version tag builds the exe on a GitHub Windows runner and publishes it
-as a Release (see [`.github/workflows/release.yml`](.github/workflows/release.yml)),
-which every installed app then offers via self-update:
+Releases are driven by the **commit message** — no buttons, no manual tags.
+Put a `[release]` marker in a commit on `main` and CI
+([`.github/workflows/release.yml`](.github/workflows/release.yml)) bumps the
+version, builds the exe on a Windows runner, and publishes it as a Release that
+every installed app then offers via self-update:
 
 ```
-git tag v1.1.0
-git push origin v1.1.0
+git commit -m "fix rescale slope flattening [release]"        # patch -> vX.Y.(Z+1)
+git commit -m "add stack splitting [release minor]"           # minor -> vX.(Y+1).0
+git commit -m "new config format, breaking [release major]"   # major -> v(X+1).0.0
+git push
 ```
 
-The workflow stamps the version from the tag, builds with PyInstaller, computes
-a SHA‑256, and attaches `DICOMToolkit.exe` (+ `.sha256`) to the release with
-auto-generated notes. Use normal semver tags (`vMAJOR.MINOR.PATCH`); updates are
-release-based, so untagged commits are never pushed to users.
+- **No `[release]` marker → nothing is built.** You stay in control: ordinary
+  commits never reach users; only a commit you mark cuts a release.
+- The version number is computed automatically from the last release tag and the
+  bump you asked for (default `patch`), stamped into the build, SHA‑256'd, and
+  attached (`DICOMToolkit.exe` + `.sha256`) with auto‑generated notes.
+- A manually pushed `vX.Y.Z` tag still triggers a build too (fallback).
 
 ## Testing
 
