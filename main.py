@@ -23,12 +23,23 @@ def main() -> int:
         app.update()
         decoders = render.decoders()
         dec_line = ", ".join(f"{k}={v}" for k, v in decoders.items())
+        try:
+            from dicomanonymizer import anonymize_dataset
+            from pydicom.dataset import Dataset as _DS
+            _t = _DS()
+            _t.PatientName = "X"
+            _t.PatientID = "Y"
+            anonymize_dataset(_t, delete_private_tags=True)
+            deid_ok = str(_t.PatientName) == ""
+        except Exception:  # noqa: BLE001
+            deid_ok = False
         (paths.data_dir() / "selfcheck.txt").write_text(
             f"dnd_ok={app._dnd_ok}\n"
             f"conformance_ok={conformance.available()}\n"
             f"conformance_edition={conformance.edition()}\n"
             f"render_decoders_ok={all(decoders.values()) if decoders else False}\n"
-            f"render_decoders={dec_line}\n",
+            f"render_decoders={dec_line}\n"
+            f"deid_basic_profile_ok={deid_ok}\n",
             encoding="utf-8")
         app.destroy()
         return 0

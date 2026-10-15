@@ -1,9 +1,11 @@
 # DICOM Toolkit
 
-A modern, unified replacement for the legacy `DCM*` executables. Every old tool
-is now a tab inside **one** double-click application (`DICOMToolkit.exe`), built
-on the maintained [pydicom](https://pydicom.github.io/) /
-[pynetdicom](https://pydicom.github.io/pynetdicom/) libraries.
+A modern, unified replacement for the legacy `DCM*` executables — every old tool
+is a tab inside **one** double-click application (`DICOMToolkit.exe`), built on
+the maintained [pydicom](https://pydicom.github.io/) /
+[pynetdicom](https://pydicom.github.io/pynetdicom/) libraries. It runs **fully
+offline**: no data ever leaves the machine except the DICOM associations *you*
+initiate to destinations *you* configure.
 
 ## What replaced what
 
@@ -16,35 +18,67 @@ on the maintained [pydicom](https://pydicom.github.io/) /
 | `DCMTagLister.exe` | **Tag Lister** tab |
 | `DCMSplitMF.exe` | **Split Multiframe** tab |
 | `DCMFolderDumper.exe` / `DumpExamData.exe` | **Folder Dump** tab |
-| `DCMStoreService` | **Store Receiver** tab (runs in-app *or* as a Windows service) |
-| `custom_code_*.cs` (C# compiled at runtime) | Anonymize / Morph config + pixel-blanking, all built in |
+| `DCMStoreService` | **Store Receiver** tab (in-app *or* a Windows service) |
+| `JDICOM\ModalitySCU` | **Modality SCU** tab (Worklist + MPPS + exam) |
+| `custom_code_*.cs` | Anonymize / morph / pixel-blank, all built in |
 
-> `SmartHL7.Sender` is HL7, not DICOM, and is **not** part of this app (separate track if wanted).
+> `SmartHL7.Sender` is HL7, not DICOM, and is **not** part of this app.
 
-### Added beyond the legacy tools
+## Beyond the legacy tools
+
 | Tab | What it does |
 |-----|--------------|
-| **Echo All (health)** | One click pings every saved destination; shows reachable/unreachable + latency. |
-| **Retrieve (C-Get)** | Query a source and pull studies to a local folder over a single association — no need to register your AE/port on the remote (firewall-friendly alternative to C-Move). |
-| **Storage Commit** | Ask an archive to confirm it safely stored specific objects (N-ACTION + N-EVENT-REPORT). |
-| **De-identify Files** | Run the Store Receiver's anonymize/morph/pixel-blank engine on local files/folders — great for research data prep. |
-| **Logs** | Live tail of the activity log with auto-refresh. |
+| **Echo All (health)** | Ping every saved destination; sortable table (click a column), OK/Fail filter, latency. |
+| **Retrieve (C-Get)** | Pull studies to a local folder over one association — no need to register your AE/port on the remote (firewall-friendly). |
+| **Storage Commit** | Ask an archive to confirm it stored specific objects (N-ACTION + N-EVENT-REPORT). |
+| **Patient / Study / Series Info** | Edit demographics across a loaded study in labelled fields, with live DICOM VR validation. |
+| **Enhanced → Classic** | Convert Enhanced CT/MR/PET multi-frame objects to classic single-frame DICOM (functional groups flattened). |
+| **Preview** | Render an object's pixels to a thumbnail (grayscale/color, multi-frame) for a visual spot-check. |
+| **QA / Consistency** | Scan a folder for problems (see below). |
+| **De-identify Files** | DICOM PS3.15 Basic Profile + the receiver's anonymize/morph/pixel-blank engine. |
+| **Modality SCU** | Query the Modality Worklist, then perform an exam: MPPS In Progress → stamp & send images → MPPS Completed. |
 
-Send now shows a **progress bar + Cancel** for large transfers.
+Most tools accept **folders and `.zip` archives** (dropped or via the buttons) —
+zips are auto-extracted to a temp folder and queued, no manual unzip. Large
+transfers run in parallel with a progress bar + Cancel.
 
-### Secure DICOM (TLS) and timeouts
-- Each destination has a **per-destination timeout** and a **TLS** toggle
-  (Settings tab). Client TLS material (CA/trust file, and an optional client
-  cert + key for mutual TLS) is configured once under **Client TLS**.
-- The **Store Receiver** can require TLS on its listener — supply a server
-  cert + key, and optionally a client CA to require mutual TLS.
-- Hostname checking is disabled by design (PACS/VNA certs rarely match the IP);
-  certificate-chain verification against your CA is still enforced when a CA
-  file is provided.
+## Validation (QA / Consistency)
+
+Load a folder or zip and scan. On top of the built-in tag checks
+(incongruent / abnormal / missing / duplicate / folder-mismatch), three opt-in
+checks cover the axes file inspection alone can't:
+
+- **IOD conformance** — does each object match the DICOM standard's required
+  modules and Type-1/1C/2/2C attributes for its SOP class (via a copy of the
+  standard bundled in the exe).
+- **C-STORE send-ability** — round-trips each object through a built-in standard
+  Storage SCP to catch transfer-syntax / SOP-class problems that would stop a
+  real send (e.g. private/unknown SOP classes).
+- **Render** — decodes the pixel data and exercises the display pipeline
+  (modality + VOI LUT), flagging anything that won't decode. JPEG / JPEG2000 /
+  JPEG-LS decode offline via bundled decoders.
+
+Findings are colour-coded, filterable by category, and exportable to CSV.
+Everything runs **offline** — no image data leaves the machine.
+
+## De-identification
+
+The **De-identify Files** tool (same engine as the Store Receiver) offers a
+one-click **DICOM PS3.15 Basic Confidentiality Profile**: it empties/removes the
+confidentiality-profile attributes, removes private tags, replaces UIDs
+consistently across the batch, and stamps the de-identification markers
+(`PatientIdentityRemoved=YES`, `DeidentificationMethod`, code `113100`). It is
+strict about site identifiers (institution name/address/department/station) by
+default, with an optional **retain study dates** toggle for longitudinal use.
+The legacy anonymize-by-file / morph / top-left pixel-blanking options remain.
+
+> ⚠ The Basic Profile is an **attribute** profile — it does **not** remove
+> burned-in pixel text. Use the Remove-Image options and/or the **Preview** /
+> **QA → Render** checks to catch burned-in PHI.
 
 ## Running
 
-- **Users:** double-click `dist/DICOMToolkit.exe`. No Python install required.
+- **Users:** double-click `dist\DICOMToolkit.exe`. No Python install required.
 - **Developers:**
   ```
   py -3 -m venv .venv
@@ -52,63 +86,77 @@ Send now shows a **progress bar + Cancel** for large transfers.
   .venv\Scripts\python main.py
   ```
 
+## Sharing the exe internally
+
+The whole app is the single `DICOMToolkit.exe` — nothing else needs to travel
+with it. To share on an internal drive:
+
+1. Copy **`DICOMToolkit.exe`** to the share (that one file is the whole app).
+2. Tell recipients to **copy it to a local, writable folder** (e.g. their
+   Desktop) before running — it creates its `DICOMToolkit-data\` beside itself.
+3. On first launch Windows **SmartScreen** may warn (unsigned exe): *More info →
+   Run anyway*. Some antivirus may need to allowlist a PyInstaller exe.
+4. Each person adds their own destinations (Settings). To hand over a shared
+   list, use **Settings → Export** and have them **Import** it — don't copy your
+   raw `DICOMToolkit-data\` (it also holds your logs/reports).
+
 ## Configuration & data
 
-Settings live in a portable `DICOMToolkit-data\` folder next to the exe
-(falls back to `%APPDATA%\DICOMToolkit` if that location is read-only):
+Settings live in a portable `DICOMToolkit-data\` folder next to the exe (falls
+back to `%APPDATA%\DICOMToolkit` if that location is read-only):
 
-- `settings.json` — your local AE title + appearance
-- `destinations.json` — the PACS/VNA/etc. address book (used by every tab)
+- `settings.json` — local AE title, appearance, window geometry, worker counts, TLS paths
+- `destinations.json` — the address book (name, AE, host, port, **group**, optional **calling AE**)
 - `receiver.json` — the Store Receiver config (shared with the Windows service)
-- `logs\dcmtoolkit.log` — rotating activity log
+- `logs\`, `reports\`, `exams\` — activity log, per-run reports, converted exams
 
-> 🔒 **This folder is git-ignored and is never committed.** `destinations.json`
-> and friends hold your site's real AE titles, hostnames, and ports — they stay
-> on your machine only. The repository ships **no** real destinations.
+> 🔒 **This folder is git-ignored and never committed.** It holds your site's
+> real AE titles, hostnames, and ports — they stay on your machine only. The
+> repository ships **no** real destinations.
 
-## Adding your destinations (first run)
+### Destinations
 
-The app starts with an empty address book. Populate it from the **Settings** tab
-in any of these ways:
+Add them on the **Settings** tab (inline **+ Add**, **Import** CSV/JSON, or
+**Import legacy folder** of old `DCM*.csv`), then **Save**. Two refinements:
 
-1. **+ Add** — type a single destination (name, AE title, host, port) inline.
-2. **Import file…** — load a `.csv` or `.json` file of destinations.
-3. **Import legacy folder…** — point at a folder containing old
-   `DCMSend.csv` / `DCMQueryMove.csv` / `DCMDropMove.csv` files.
-4. **Export…** — save your current list to `.csv` or `.json` (for backup or to
-   share with a teammate — remember this file contains real addresses).
+- **Group** — *PACS / Storage* (default) or *Worklist / MPPS*. Storage tools
+  show only storage destinations; the Modality SCU's worklist picker shows only
+  worklist/MPPS servers. Destinations sort alphabetically.
+- **Calling AE (optional)** — present a specific local AE title to *this*
+  destination (e.g. a RIS that only answers a registered modality AE), without
+  changing your app-wide My AE Title.
 
-Then click **Save**. A template is provided at
-[`destinations.sample.csv`](destinations.sample.csv):
-
-```csv
-name,aetitle,host,port
-Example PACS,EXAMPLE_PACS,192.0.2.10,104
-Example VNA,EXAMPLE_VNA,192.0.2.20,11112
-```
-
-(The importer also accepts the legacy `MoveSource,name,aetitle,host,port` row
-format, so old exported CSVs work as-is.)
+A template is provided at [`destinations.sample.csv`](destinations.sample.csv)
+(uses the RFC 5737 documentation range, not real hosts).
 
 ## Store Receiver as a Windows service
-
-The receiver can run headless and always-on, like the old `DCMStoreService`.
-Configure it on the **Store Receiver** tab, click **Save config**, then use the
-service buttons (they prompt for UAC elevation), or from an elevated console:
 
 ```
 DICOMToolkit.exe service install
 DICOMToolkit.exe service start
 DICOMToolkit.exe service stop
 DICOMToolkit.exe service remove
-DICOMToolkit.exe service run     # run in the foreground for testing
+DICOMToolkit.exe service run     # foreground, for testing
 ```
 
-The service reads the same `receiver.json`, so what you test in-app is exactly
-what the service runs. Supported de-identification (all from the old Setup
-Guide): remove private tags, remove groups/tags, anonymize-by-file (REMOVE /
-BLANK / replace) with consistent UID remapping, calculated dates, top/left pixel
-blanking with modality filters, and tag morphing.
+The service reads the same `receiver.json`, so what you test in-app is what the
+service runs.
+
+### Secure DICOM (TLS)
+
+Each destination has a per-destination timeout and a TLS toggle; client TLS
+material (CA trust file + optional client cert/key for mutual TLS) is configured
+once under **Client TLS**. The Store Receiver can require TLS (and optionally
+mutual TLS) on its listener. Certificate-chain verification against your CA is
+enforced; hostname checking is off by design (PACS certs rarely match the IP).
+
+## Offline & privacy
+
+Everything runs on the machine. The DICOM standard used by the conformance
+check (parsed to ~2.5 MB of JSON) and the compressed-pixel decoders
+(JPEG/JPEG2000/JPEG-LS) are **bundled in the exe** — nothing is downloaded at
+runtime, and no image data is ever transmitted except the DICOM associations you
+start to destinations you configure.
 
 ## Building the exe
 
@@ -116,18 +164,35 @@ blanking with modality filters, and tag morphing.
 .venv\Scripts\pyinstaller DICOMToolkit.spec --noconfirm --clean
 ```
 
-Produces `dist\DICOMToolkit.exe` (~34 MB, single file).
+Produces `dist\DICOMToolkit.exe` (~40 MB, single file; includes the bundled
+DICOM standard + pixel decoders).
+
+## Testing
+
+```
+.venv\Scripts\pip install -r requirements-dev.txt
+.venv\Scripts\python -m pytest
+```
+
+The suite (`tests/`) covers the engines offline with synthetic data and
+throwaway localhost SCPs — file/zip ops, Enhanced→Classic, the QA checks
+(conformance / send-ability / render), de-identification, network round-trips
+(echo / store / worklist / MPPS), and the model + import/export.
 
 ## Project layout
 
 ```
 dcmtoolkit/
   paths.py, config.py, model.py, logging_setup.py, importer.py
-  net/      scu.py (echo/send/find/move), scp.py (receiver)
-  store/    naming.py (folder formats), processing.py (anon/morph/pixel)
-  tools/    fileops.py (tag list / modify / split / dump)
+  net/      scu.py (echo/send/find/move/get/commit), scp.py (receiver),
+            mwl.py (worklist), mpps.py, selftest.py (C-STORE send-ability)
+  store/    naming.py (folder formats), processing.py (anon/morph/PS3.15/pixel)
+  tools/    fileops.py, dicomtags.py, qa.py, conformance.py, render.py,
+            enhanced.py (Enhanced→Classic), modality.py (exam stamping)
   gui/      app.py + panels_*.py
   service.py
-main.py                # entry point
-DICOMToolkit.spec      # PyInstaller build
+assets/dicom-standard/   bundled DICOM standard JSON (conformance)
+tests/                   pytest suite
+main.py                  entry point
+DICOMToolkit.spec        PyInstaller build
 ```
