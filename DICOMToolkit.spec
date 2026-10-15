@@ -28,6 +28,11 @@ hiddenimports += collect_submodules("pynetdicom")
 hiddenimports += collect_submodules("pydicom")
 # dicom-validator is imported lazily for conformance checks; pull it all in.
 hiddenimports += collect_submodules("dicom_validator")
+# dicom-anonymizer (PS3.15 Basic Profile) ships action-table data files.
+_da, _db, _dh = collect_all("dicomanonymizer")
+datas += _da
+binaries += _db
+hiddenimports += _dh
 
 # Compressed-pixel decoders (render check). pylibjpeg discovers its plugins via
 # entry-point metadata, so collect the packages AND their metadata, plus the

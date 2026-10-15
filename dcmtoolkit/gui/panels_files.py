@@ -569,6 +569,13 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         def entry(width=280):
             return ctk.CTkEntry(form, width=width)
 
+        self.basic_profile = ctk.CTkCheckBox(
+            form, text="DICOM PS3.15 Basic Confidentiality Profile "
+            "(recommended)")
+        row("", self.basic_profile)
+        self.retain_dates = ctk.CTkCheckBox(
+            form, text="   └ retain study dates (longitudinal)")
+        row("", self.retain_dates)
         self.rm_private = ctk.CTkCheckBox(form, text="Remove private tags")
         self.rm_private.select()
         row("", self.rm_private)
@@ -692,6 +699,8 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             except ValueError:
                 return d
         return ReceiverConfig(
+            basic_profile=bool(self.basic_profile.get()),
+            retain_dates=bool(self.retain_dates.get()),
             remove_private_tags=bool(self.rm_private.get()),
             remove_groups=_split(self.rm_groups.get()),
             remove_tags=_split(self.rm_tags.get()),

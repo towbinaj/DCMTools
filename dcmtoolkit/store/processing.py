@@ -25,6 +25,10 @@ from ..logging_setup import get_logger
 
 log = get_logger("store.processing")
 
+# dicom-anonymizer keeps a process-global UID map; serialize access so the
+# Basic Profile is safe under the parallel de-identify worker pool.
+_ANON_LOCK = threading.Lock()
+
 BASELINE = date(1900, 1, 1)
 _DATE_TAGS = ["StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate"]
 
@@ -48,6 +52,9 @@ class ReceiverConfig:
     remove_tags: list[str] = field(default_factory=list)     # ["00081040", ...]
     anonymize_tags: bool = False
     anonymize_file: str = ""
+    # DICOM PS3.15 Basic Application Confidentiality Profile (standards-based).
+    basic_profile: bool = False
+    retain_dates: bool = False   # Retain Longitudinal Temporal Info (study dates)
     calculated_dates: bool = False
     remove_image_top: int = 0
     remove_image_top_modality: list[str] = field(default_factory=list)
@@ -132,10 +139,12 @@ class Processor:
 
     # -- per-object processing ------------------------------------------
     def process(self, ds: Dataset) -> Dataset:
+        if self.cfg.basic_profile:
+            self._apply_basic_profile(ds)
         if self.cfg.morph_tags:
             self._apply_morph(ds)
-        if self.cfg.remove_private_tags:
-            ds.remove_private_tags()
+        if self.cfg.remove_private_tags and not self.cfg.basic_profile:
+            ds.remove_private_tags()   # the Basic Profile already removes these
         self._apply_remove_groups(ds)
         self._apply_remove_tags(ds)
         if self.cfg.anonymize_tags:
@@ -145,6 +154,48 @@ class Processor:
             self._remap_uids(ds)
         self._apply_pixel_blanking(ds)
         return ds
+
+    # Dates/times retained under the "Retain Longitudinal Temporal Information"
+    # option (study context) - NOT PatientBirthDate, which stays removed.
+    _RETAIN_DATE_TAGS = (0x00080020, 0x00080021, 0x00080022, 0x00080023,
+                         0x0008002A, 0x00080030, 0x00080031, 0x00080032,
+                         0x00080033)
+
+    def _apply_basic_profile(self, ds: Dataset) -> None:
+        """Apply the DICOM PS3.15 Basic Application Confidentiality Profile.
+
+        Uses the dicom-anonymizer PS3.15 action tables; UIDs are replaced
+        consistently across the batch (same source UID -> same new UID). A lock
+        guards the library's process-global UID map for parallel safety.
+        NOTE: this is an *attribute* profile - it does not remove burned-in
+        pixel text; use the Remove-Image options / QA Render check for that.
+        """
+        from dicomanonymizer import anonymize_dataset
+        from dicomanonymizer.simpledicomanonymizer import (keep as _keep,
+                                                           delete as _delete)
+
+        extra: dict = {}
+        # The bare Basic Profile leaves institution identity to an option; for
+        # safe trial sharing, remove site identifiers by default.
+        for t in (0x00080080, 0x00080081, 0x00080082, 0x00081010, 0x00081040):
+            extra[(t >> 16, t & 0xFFFF)] = _delete
+        if self.cfg.retain_dates:
+            for t in self._RETAIN_DATE_TAGS:
+                extra[(t >> 16, t & 0xFFFF)] = _keep
+        with _ANON_LOCK:
+            anonymize_dataset(ds, extra_anonymization_rules=extra,
+                              delete_private_tags=True)
+        # PS3.15 de-identification markers.
+        ds.PatientIdentityRemoved = "YES"
+        ds.DeidentificationMethod = "PS3.15 Basic Conf. Profile (DCMTools)"
+        code = Dataset()
+        code.CodeValue = "113100"
+        code.CodingSchemeDesignator = "DCM"
+        code.CodeMeaning = "Basic Application Confidentiality Profile"
+        ds.DeidentificationMethodCodeSequence = [code]
+        fm = getattr(ds, "file_meta", None)
+        if fm is not None and "SOPInstanceUID" in ds:
+            fm.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
 
     def _apply_remove_groups(self, ds: Dataset) -> None:
         for grp in self.cfg.remove_groups:
