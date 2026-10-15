@@ -18,6 +18,7 @@ from .panels_network import (EchoPanel, SendPanel, QueryMovePanel,
                              EchoAllPanel, RetrievePanel, StorageCommitPanel)
 from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
                            DeidentifyPanel, EnhancedPanel)
+from .panels_preview import PreviewPanel
 from .panels_edit import PatientEditPanel, StudyEditPanel, SeriesEditPanel
 from .panels_modality import ModalitySCUPanel
 from .panels_qa import QAPanel
@@ -36,8 +37,8 @@ except Exception:  # noqa: BLE001
 NAV_GROUPS = [
     ("Network", [EchoPanel, EchoAllPanel, SendPanel, QueryMovePanel,
                  RetrievePanel, StorageCommitPanel]),
-    ("Files", [TagListPanel, ModifyPanel, SplitPanel, EnhancedPanel, DumpPanel,
-               DeidentifyPanel, QAPanel]),
+    ("Files", [TagListPanel, PreviewPanel, ModifyPanel, SplitPanel,
+               EnhancedPanel, DumpPanel, DeidentifyPanel, QAPanel]),
     ("Edit demographics", [PatientEditPanel, StudyEditPanel, SeriesEditPanel]),
     ("Modality", [ModalitySCUPanel]),
 ]

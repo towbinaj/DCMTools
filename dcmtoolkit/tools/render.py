@@ -38,6 +38,53 @@ def decoders() -> dict[str, bool]:
     return out
 
 
+def frame_count(ds: Dataset) -> int:
+    try:
+        return max(1, int(getattr(ds, "NumberOfFrames", 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def render_image(ds: Dataset, frame: int = 0):
+    """Return a PIL.Image for the given frame (for a visual spot-check).
+
+    Handles grayscale (MONOCHROME1/2, via modality+VOI LUT and 8-bit
+    normalization) and color (RGB / YBR converted to RGB). Raises if there is
+    no pixel data or it cannot be decoded.
+    """
+    import numpy as np
+    from PIL import Image
+
+    if "PixelData" not in ds:
+        raise ValueError("no pixel data (nothing to display)")
+    arr = ds.pixel_array
+    frames = frame_count(ds)
+    if frames > 1 and arr.ndim >= 3 and arr.shape[0] == frames:
+        arr = arr[max(0, min(frame, frames - 1))]
+
+    photometric = str(getattr(ds, "PhotometricInterpretation", "")).upper()
+    if photometric.startswith("MONOCHROME") or arr.ndim == 2:
+        out = apply_voi_lut(apply_modality_lut(arr, ds), ds).astype("float64")
+        lo, hi = float(np.nanmin(out)), float(np.nanmax(out))
+        out = (out - lo) / (hi - lo) * 255.0 if hi > lo else out * 0
+        if photometric == "MONOCHROME1":
+            out = 255.0 - out
+        return Image.fromarray(out.astype("uint8"), mode="L")
+
+    # Color: convert YBR -> RGB if needed, ensure 8-bit.
+    if photometric.startswith("YBR"):
+        try:
+            from pydicom.pixels import convert_color_space
+        except ImportError:
+            from pydicom.pixel_data_handlers.util import convert_color_space
+        arr = convert_color_space(arr, photometric, "RGB")
+    if arr.dtype != np.uint8:
+        a = arr.astype("float64")
+        lo, hi = float(a.min()), float(a.max())
+        arr = ((a - lo) / (hi - lo) * 255.0 if hi > lo else a * 0).astype("uint8")
+    return Image.fromarray(arr[..., :3], mode="RGB")
+
+
 def render_errors(ds: Dataset) -> list[str]:
     """Return problems preventing the object from rendering (empty = OK).
 

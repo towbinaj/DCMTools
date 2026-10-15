@@ -49,6 +49,7 @@ TOOL_COLORS: dict[str, str] = {
     "RetrievePanel": "#5cb85c",      # green
     "StorageCommitPanel": "#d9695f", # coral
     "TagListPanel": "#6fa8dc",       # light blue
+    "PreviewPanel": "#56b6c2",       # cyan
     "ModifyPanel": "#d4a017",        # gold
     "SplitPanel": "#8e79c9",         # violet
     "EnhancedPanel": "#5bb5a8",      # teal-green

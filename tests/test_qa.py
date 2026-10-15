@@ -80,3 +80,29 @@ def test_render_decodes_compressed_samples(tmp_path):
         pytest.skip("pydicom test data unavailable")
     res = qa.qa_scan(sorted(tmp_path.glob("*.dcm")), render=True, workers=2)
     assert not [f for f in res.findings if f.category == "render"]
+
+
+def test_render_image_grayscale_and_multiframe():
+    from PIL import Image
+    from dcmtoolkit.tools import render
+    ds = make_ct()
+    img = render.render_image(ds, 0)
+    assert isinstance(img, Image.Image) and img.size == (4, 4)
+    ds.NumberOfFrames = 3
+    import numpy as np
+    ds.PixelData = (np.arange(3 * 4 * 4, dtype="uint16").tobytes())
+    assert render.frame_count(ds) == 3
+    assert render.render_image(ds, 2).size == (4, 4)
+
+
+def test_render_image_color_sample():
+    import pytest, shutil
+    from PIL import Image
+    from pydicom import dcmread
+    from pydicom.data import get_testdata_file
+    from dcmtoolkit.tools import render
+    p = get_testdata_file("SC_rgb_jpeg.dcm")
+    if not p:
+        pytest.skip("sample unavailable")
+    img = render.render_image(dcmread(p), 0)
+    assert isinstance(img, Image.Image) and img.mode == "RGB"
