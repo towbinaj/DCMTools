@@ -18,13 +18,17 @@ def main() -> int:
         # Headless diagnostic: report optional-feature availability, then exit.
         from dcmtoolkit.gui.app import App
         from dcmtoolkit import paths
-        from dcmtoolkit.tools import conformance
+        from dcmtoolkit.tools import conformance, render
         app = App()
         app.update()
+        decoders = render.decoders()
+        dec_line = ", ".join(f"{k}={v}" for k, v in decoders.items())
         (paths.data_dir() / "selfcheck.txt").write_text(
             f"dnd_ok={app._dnd_ok}\n"
             f"conformance_ok={conformance.available()}\n"
-            f"conformance_edition={conformance.edition()}\n",
+            f"conformance_edition={conformance.edition()}\n"
+            f"render_decoders_ok={all(decoders.values()) if decoders else False}\n"
+            f"render_decoders={dec_line}\n",
             encoding="utf-8")
         app.destroy()
         return 0

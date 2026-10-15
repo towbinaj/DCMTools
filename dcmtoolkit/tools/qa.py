@@ -19,6 +19,7 @@ from pydicom import dcmread
 
 from . import dicomtags
 from . import conformance as _conformance
+from . import render as _render
 from .fileops import _run_pool
 
 # keyword -> VR (for the abnormal-value validation)
@@ -62,7 +63,8 @@ def _short(uid: str) -> str:
 
 
 def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
-            conformance: bool = False, sendability: bool = False) -> QAResult:
+            conformance: bool = False, sendability: bool = False,
+            render: bool = False) -> QAResult:
     files = [Path(f) for f in files]
     total = len(files)
     records: list[dict] = []
@@ -81,7 +83,8 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
             return
         ok, detail = True, "ok"
         try:
-            ds = dcmread(str(f), force=True, stop_before_pixels=True)
+            # Pixels are only needed for the render check.
+            ds = dcmread(str(f), force=True, stop_before_pixels=not render)
             rec = {"__file": f}
             for kw in _FIELDS:
                 v = ds.get(kw)
@@ -93,8 +96,11 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
                 if fm is not None else ""
             if msc == "1.2.840.10008.1.3.10" or f.name.upper() == "DICOMDIR":
                 rec["__skip"] = "DICOMDIR / media directory"
-            elif conformance:
-                rec["__conf"] = _conformance.conformance_errors(ds)
+            else:
+                if conformance:
+                    rec["__conf"] = _conformance.conformance_errors(ds)
+                if render:
+                    rec["__render"] = _render.render_errors(ds)
         except Exception as exc:  # noqa: BLE001
             ok, detail = False, str(exc).strip()[:120]
             rec = {"__file": f, "__unreadable": detail}
@@ -146,6 +152,15 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
                 "conformance",
                 f"{name}: {len(errs)} IOD conformance issue(s)",
                 "  |  ".join(errs)[:800]))
+
+    # Render / pixel-decode - only when requested
+    for r in good:
+        errs = r.get("__render")
+        if errs:
+            name = Path(r["__file"]).name
+            findings.append(Finding(
+                "render", f"{name}: will not render",
+                "; ".join(errs)[:500]))
 
     # incongruent (grouped)
     def check(group_field, uniform, level):

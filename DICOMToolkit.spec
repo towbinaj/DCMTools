@@ -2,7 +2,7 @@
 # Build:  pyinstaller DICOMToolkit.spec --noconfirm
 # Output: dist/DICOMToolkit.exe  (single-file, double-click)
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 datas = [("assets/icon.ico", "assets")]
 # Bundle the DICOM standard (parsed to JSON) so IOD conformance validation
@@ -28,6 +28,23 @@ hiddenimports += collect_submodules("pynetdicom")
 hiddenimports += collect_submodules("pydicom")
 # dicom-validator is imported lazily for conformance checks; pull it all in.
 hiddenimports += collect_submodules("dicom_validator")
+
+# Compressed-pixel decoders (render check). pylibjpeg discovers its plugins via
+# entry-point metadata, so collect the packages AND their metadata, plus the
+# compiled plugin modules and pydicom's pixel handlers.
+for pkg in ("pylibjpeg", "pylibjpeg_libjpeg", "pylibjpeg_openjpeg"):
+    d, b, h = collect_all(pkg)
+    datas += d
+    binaries += b
+    hiddenimports += h
+for dist in ("pylibjpeg", "pylibjpeg-libjpeg", "pylibjpeg-openjpeg"):
+    try:
+        datas += copy_metadata(dist)
+    except Exception:
+        pass
+hiddenimports += ["openjpeg", "libjpeg"]
+hiddenimports += collect_submodules("pydicom.pixels")
+hiddenimports += collect_submodules("pydicom.pixel_data_handlers")
 
 # pywin32 pieces needed for the Windows service path.
 hiddenimports += [

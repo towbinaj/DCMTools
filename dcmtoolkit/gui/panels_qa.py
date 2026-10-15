@@ -24,9 +24,10 @@ _CAT_COLOR = {
     "mismatch": "#e0894a",
     "conformance": "#7b8ce0",
     "transfer": "#4aa3a0",
+    "render": "#c97ba8",
 }
 _CATEGORIES = ["All", "incongruent", "abnormal", "missing", "duplicate",
-               "mismatch", "conformance", "transfer"]
+               "mismatch", "conformance", "transfer", "render"]
 
 
 class QAPanel(_DropSourceMixin, ToolPanel):
@@ -73,6 +74,8 @@ class QAPanel(_DropSourceMixin, ToolPanel):
                                     text="IOD conformance (unavailable)")
         self.send_chk = ctk.CTkCheckBox(bar, text="C-STORE send-ability")
         self.send_chk.pack(side="left", padx=(0, PAD))
+        self.render_chk = ctk.CTkCheckBox(bar, text="Render")
+        self.render_chk.pack(side="left", padx=(0, PAD))
         ctk.CTkLabel(bar, text="Show").pack(side="left", padx=(PAD, 4))
         self.filter = ctk.CTkOptionMenu(bar, values=_CATEGORIES, width=130,
                                         command=lambda _v: self._render())
@@ -163,12 +166,13 @@ class QAPanel(_DropSourceMixin, ToolPanel):
 
         conf = bool(self.conf_chk.get())
         sendable = bool(self.send_chk.get())
+        rend = bool(self.render_chk.get())
 
         def worker():
             return qa.qa_scan(files, on_item=on_item,
                               should_cancel=lambda: self._cancel,
                               workers=workers, conformance=conf,
-                              sendability=sendable)
+                              sendability=sendable, render=rend)
 
         def done(result):
             self._findings = result.findings

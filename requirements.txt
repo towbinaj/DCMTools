@@ -9,6 +9,9 @@ pillow==12.3.0
 pydicom==3.0.2
 pyinstaller==6.22.0
 pyinstaller-hooks-contrib==2026.6
+pylibjpeg==2.1.0
+pylibjpeg-libjpeg==2.4.0
+pylibjpeg-openjpeg==2.6.0
 pynetdicom==3.0.4
 pywin32==312
 pywin32-ctypes==0.2.3
