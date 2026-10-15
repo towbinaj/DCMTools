@@ -39,25 +39,6 @@ ENHANCED_TO_CLASSIC = {
     "1.2.840.10008.5.1.4.1.1.128.1": "1.2.840.10008.5.1.4.1.1.128",  # LegacyConv PET
 }
 
-# Functional-group macros flattened to the classic top level. Only same-VR
-# mappings (source attribute == target attribute) so values copy cleanly.
-_MACROS = [
-    ("PixelMeasuresSequence",
-     ["PixelSpacing", "SliceThickness", "SpacingBetweenSlices"]),
-    ("PlanePositionSequence", ["ImagePositionPatient"]),
-    ("PlaneOrientationSequence", ["ImageOrientationPatient"]),
-    ("FrameVOILUTSequence",
-     ["WindowCenter", "WindowWidth", "WindowCenterWidthExplanation",
-      "VOILUTFunction"]),
-    ("PixelValueTransformationSequence",
-     ["RescaleIntercept", "RescaleSlope", "RescaleType"]),
-    ("FrameAnatomySequence", ["ImageLaterality"]),
-]
-# Any of these frame-type macros carry FrameType -> classic ImageType.
-_FRAME_TYPE_MACROS = [
-    "CTImageFrameTypeSequence", "MRImageFrameTypeSequence",
-    "PETFrameTypeSequence", "ImageFrameTypeSequence",
-]
 # Enhanced-only elements that must not appear in a classic instance.
 _DROP = [
     "NumberOfFrames", "FrameIncrementPointer",
@@ -92,39 +73,32 @@ _RENAME = {
 }
 
 
-def _apply_macros(target: Dataset, fg_item) -> None:
-    """Canonical (clean) mode: only the standard classic attributes."""
-    if fg_item is None:
-        return
-    for macro_kw, attrs in _MACROS:
-        seq = getattr(fg_item, macro_kw, None)
-        if not seq:
-            continue
-        item = seq[0]
-        for kw in attrs:
-            if kw in item:
-                setattr(target, kw, item[kw].value)
-    for macro_kw in _FRAME_TYPE_MACROS:
-        seq = getattr(fg_item, macro_kw, None)
-        if seq and "FrameType" in seq[0]:
-            target.ImageType = list(seq[0].FrameType)
+def _is_enhanced_specific(tag) -> bool:
+    """True for attributes that belong only to enhanced/functional-group IODs,
+    so they have no place in a classic single-frame object. Elements >= 0x9000
+    are the multi-frame/functional-group additions; groups 5200/5260 are the
+    functional-group sequences themselves."""
+    return tag.element >= 0x9000 or tag.group in (0x5200, 0x5260)
 
 
 def _flat_set(target: Dataset, child) -> None:
     kw = child.keyword
     if kw in _RENAME:
         try:
-            setattr(target, _RENAME[kw], child.value)
+            setattr(target, _RENAME[kw], child.value)   # into its classic tag
         except Exception:  # noqa: BLE001 - skip if VR/value incompatible
             pass
-    elif child.tag.element != 0x0000:   # skip group-length elements
-        target[child.tag] = copy.deepcopy(child)
+        return
+    tag = child.tag
+    if tag.element == 0x0000 or _is_enhanced_specific(tag):
+        return   # group-length or enhanced-specific -> not carried over
+    target[tag] = copy.deepcopy(child)
 
 
-def _flatten_all(target: Dataset, fg_item) -> None:
-    """Carry-over mode: flatten EVERY attribute from the functional-group item
-    onto the classic top level (one level into each macro sequence), so no
-    field is lost. Renamed attributes land in their classic tag."""
+def _flatten(target: Dataset, fg_item) -> None:
+    """Flatten a functional-group item onto the classic top level: carry every
+    standard-compatible attribute (one level into each macro sequence), map the
+    renamed ones to their classic tag, and drop enhanced-specific attributes."""
     if fg_item is None:
         return
     for elem in fg_item:
@@ -170,21 +144,19 @@ def _build_base(ds: Dataset) -> Dataset:
     base = Dataset()
     drop = set(_DROP)
     for elem in ds:
-        if elem.keyword in drop:
+        if elem.keyword in drop or _is_enhanced_specific(elem.tag):
             continue
         base.add(elem)
     return copy.deepcopy(base)
 
 
-def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
-                 carry_all: bool = True) -> tuple[int, str]:
+def convert_file(src: Path, out_dir: Path, *, new_series: bool = True) -> tuple[int, str]:
     """Convert one enhanced file to classic single-frame files in ``out_dir``.
 
-    ``carry_all`` flattens every functional-group attribute onto the classic
-    top level (nothing lost); when False only the standard classic attributes
-    are carried. Returns ``(frames_written, detail)``; 0 means skipped.
+    Every standard-compatible functional-group attribute is flattened onto the
+    classic top level; enhanced-specific attributes are dropped. Returns
+    ``(frames_written, detail)``; 0 means skipped.
     """
-    _flatten = _flatten_all if carry_all else _apply_macros
     ds = dcmread(str(src), force=True)
     sop_class = str(getattr(ds, "SOPClassUID", ""))
     classic = ENHANCED_TO_CLASSIC.get(sop_class)
@@ -263,7 +235,7 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
 
 
 def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
-                     carry_all: bool = True, on_item=None, should_cancel=None,
+                     on_item=None, should_cancel=None,
                      workers: int = 1) -> ConvertResult:
     files = [Path(f) for f in files]
     result = ConvertResult(files_in=len(files))
@@ -280,8 +252,7 @@ def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
             return
         ok, detail = True, "ok"
         try:
-            written, detail = convert_file(f, out_dir, new_series=new_series,
-                                           carry_all=carry_all)
+            written, detail = convert_file(f, out_dir, new_series=new_series)
             with lock:
                 if written:
                     result.converted += 1
