@@ -83,7 +83,17 @@ def is_enhanced(ds: Dataset) -> bool:
         and "PerFrameFunctionalGroupsSequence" in ds
 
 
+# Attributes whose classic tag differs from the enhanced/functional-group tag,
+# so they land in the proper classic attribute (rest keep their own tag).
+_RENAME = {
+    "FrameType": "ImageType",            # CT/MR/PET frame type -> ImageType
+    "FrameLaterality": "ImageLaterality",
+    "EffectiveEchoTime": "EchoTime",
+}
+
+
 def _apply_macros(target: Dataset, fg_item) -> None:
+    """Canonical (clean) mode: only the standard classic attributes."""
     if fg_item is None:
         return
     for macro_kw, attrs in _MACROS:
@@ -98,6 +108,32 @@ def _apply_macros(target: Dataset, fg_item) -> None:
         seq = getattr(fg_item, macro_kw, None)
         if seq and "FrameType" in seq[0]:
             target.ImageType = list(seq[0].FrameType)
+
+
+def _flat_set(target: Dataset, child) -> None:
+    kw = child.keyword
+    if kw in _RENAME:
+        try:
+            setattr(target, _RENAME[kw], child.value)
+        except Exception:  # noqa: BLE001 - skip if VR/value incompatible
+            pass
+    elif child.tag.element != 0x0000:   # skip group-length elements
+        target[child.tag] = copy.deepcopy(child)
+
+
+def _flatten_all(target: Dataset, fg_item) -> None:
+    """Carry-over mode: flatten EVERY attribute from the functional-group item
+    onto the classic top level (one level into each macro sequence), so no
+    field is lost. Renamed attributes land in their classic tag."""
+    if fg_item is None:
+        return
+    for elem in fg_item:
+        if elem.VR == "SQ":
+            if elem.value:
+                for child in elem.value[0]:
+                    _flat_set(target, child)
+        else:
+            _flat_set(target, elem)
 
 
 def _frame_bytes_fn(ds: Dataset, n_frames: int):
@@ -140,11 +176,15 @@ def _build_base(ds: Dataset) -> Dataset:
     return copy.deepcopy(base)
 
 
-def convert_file(src: Path, out_dir: Path, *, new_series: bool = True) -> tuple[int, str]:
+def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
+                 carry_all: bool = True) -> tuple[int, str]:
     """Convert one enhanced file to classic single-frame files in ``out_dir``.
 
-    Returns ``(frames_written, detail)``; frames_written == 0 means skipped.
+    ``carry_all`` flattens every functional-group attribute onto the classic
+    top level (nothing lost); when False only the standard classic attributes
+    are carried. Returns ``(frames_written, detail)``; 0 means skipped.
     """
+    _flatten = _flatten_all if carry_all else _apply_macros
     ds = dcmread(str(src), force=True)
     sop_class = str(getattr(ds, "SOPClassUID", ""))
     classic = ENHANCED_TO_CLASSIC.get(sop_class)
@@ -161,7 +201,7 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True) -> tuple[
     shared = shared_seq[0] if shared_seq else None
 
     base = _build_base(ds)
-    _apply_macros(base, shared)   # shared attrs onto the template
+    _flatten(base, shared)   # shared attrs onto the template
 
     get_frame_bytes, pixel_vr, encapsulated = _frame_bytes_fn(ds, n)
     ts = ds.file_meta.TransferSyntaxUID
@@ -175,7 +215,7 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True) -> tuple[
     for i in range(n):
         fds = copy.deepcopy(base)
         fg = perframe[i] if i < len(perframe) else None
-        _apply_macros(fds, fg)   # per-frame overrides shared
+        _flatten(fds, fg)   # per-frame overrides shared
 
         # Identity
         fds.SOPClassUID = classic
@@ -223,7 +263,7 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True) -> tuple[
 
 
 def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
-                     on_item=None, should_cancel=None,
+                     carry_all: bool = True, on_item=None, should_cancel=None,
                      workers: int = 1) -> ConvertResult:
     files = [Path(f) for f in files]
     result = ConvertResult(files_in=len(files))
@@ -240,7 +280,8 @@ def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
             return
         ok, detail = True, "ok"
         try:
-            written, detail = convert_file(f, out_dir, new_series=new_series)
+            written, detail = convert_file(f, out_dir, new_series=new_series,
+                                           carry_all=carry_all)
             with lock:
                 if written:
                     result.converted += 1

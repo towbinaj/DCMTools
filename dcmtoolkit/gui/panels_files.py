@@ -408,11 +408,17 @@ class EnhancedPanel(_DropSourceMixin, ToolPanel):
                                     "each source)", text_color=MUTED)
         self.out_lbl.pack(side="left", padx=PAD)
 
+        opts = ctk.CTkFrame(self.body, fg_color="transparent")
+        opts.grid(row=2, column=0, sticky="w", padx=PAD, pady=(PAD, 0))
         self.new_series = ctk.CTkCheckBox(
-            self.body, text="New Series UID for the converted series "
-            "(recommended)")
+            opts, text="New Series UID (recommended)")
         self.new_series.select()
-        self.new_series.grid(row=2, column=0, sticky="w", padx=PAD, pady=(PAD, 0))
+        self.new_series.pack(side="left")
+        self.carry_all = ctk.CTkCheckBox(
+            opts, text="Carry over ALL fields (flatten every functional-group "
+            "attribute)")
+        self.carry_all.select()
+        self.carry_all.pack(side="left", padx=PAD)
 
         btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
         btnbar.grid(row=3, column=0, sticky="w", padx=PAD, pady=PAD)
@@ -442,14 +448,16 @@ class EnhancedPanel(_DropSourceMixin, ToolPanel):
         files = list(self.files)
         total = len(files)
         new_series = bool(self.new_series.get())
+        carry_all = bool(self.carry_all.get())
         self.btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
         self.log.write(f"--- Converting {total:,} file(s) -> {out} "
-                       f"(new series: {'yes' if new_series else 'no'}) ---")
+                       f"(new series: {'yes' if new_series else 'no'}, "
+                       f"carry all fields: {'yes' if carry_all else 'no'}) ---")
 
         def worker():
             return enhanced.convert_enhanced(
-                files, out, new_series=new_series,
+                files, out, new_series=new_series, carry_all=carry_all,
                 on_item=self.runner.on_item,
                 should_cancel=lambda: self.runner.cancelled,
                 workers=self._get_workers())
