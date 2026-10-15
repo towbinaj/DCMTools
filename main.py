@@ -14,6 +14,11 @@ import sys
 def main() -> int:
     argv = sys.argv[1:]
 
+    if argv and argv[0] == "apply-update" and len(argv) >= 3:
+        # Invoked on a freshly downloaded exe to swap itself into place.
+        from dcmtoolkit.updater import run_apply_update
+        return run_apply_update(argv[1], int(argv[2]))
+
     if argv and argv[0] == "selfcheck":
         # Headless diagnostic: report optional-feature availability, then exit.
         from dcmtoolkit.gui.app import App

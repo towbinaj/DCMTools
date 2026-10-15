@@ -167,6 +167,39 @@ start to destinations you configure.
 Produces `dist\DICOMToolkit.exe` (~40 MB, single file; includes the bundled
 DICOM standard + pixel decoders).
 
+## Updates (self-update)
+
+The built exe can update itself from GitHub Releases:
+
+- On launch it quietly checks the latest release; if a newer version exists, an
+  **⬆ Update to vX.Y.Z** button appears in the status bar. There's also a
+  **Check for updates** button in Settings.
+- Clicking it downloads the new exe (SHA‑256 verified) and swaps it in, then
+  reopens on the new version. **Your `DICOMToolkit-data\` (settings,
+  destinations, logs) is left untouched** — it lives beside the exe, not inside
+  it.
+- Only HTTPS **GET** requests to GitHub are made — nothing is ever uploaded.
+  Offline or firewalled machines simply skip the check (no errors) and keep
+  their version.
+
+> The downloaded exe is unsigned, so Windows SmartScreen may prompt again.
+
+### Releasing a new version (maintainer)
+
+Pushing a version tag builds the exe on a GitHub Windows runner and publishes it
+as a Release (see [`.github/workflows/release.yml`](.github/workflows/release.yml)),
+which every installed app then offers via self-update:
+
+```
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+The workflow stamps the version from the tag, builds with PyInstaller, computes
+a SHA‑256, and attaches `DICOMToolkit.exe` (+ `.sha256`) to the release with
+auto-generated notes. Use normal semver tags (`vMAJOR.MINOR.PATCH`); updates are
+release-based, so untagged commits are never pushed to users.
+
 ## Testing
 
 ```

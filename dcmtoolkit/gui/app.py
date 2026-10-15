@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import customtkinter as ctk
 
 try:
@@ -113,12 +115,101 @@ class App(*_APP_BASES):
             status, text=f"My AE: {self.settings.my_aetitle}",
             text_color=MUTED, font=ctk.CTkFont(size=11))
         self.ae_status.pack(side="right", padx=8)
+        # Update notice (hidden until an update is found).
+        self._update_info = None
+        self.update_btn = ctk.CTkButton(
+            status, text="", height=20, width=0, fg_color="#2e8b57",
+            hover_color="#3fa06a", font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._start_update)
 
         # Restore the last-used tool, else show the first panel.
         self._current = ""
         if self._buttons:
             last = self.settings.last_tool
             self.select(last if last in self.panels else next(iter(self.panels)))
+
+        # Quiet background update check (built exe only).
+        from .. import updater
+        if updater.can_self_update():
+            self.after(2500, lambda: self._check_updates_async(manual=False))
+
+    # -- self-update -----------------------------------------------------
+    def _check_updates_async(self, manual: bool = False) -> None:
+        from .. import updater
+
+        def work():
+            info = updater.check_latest()
+            self.after(0, lambda: self._on_update_result(info, manual))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_result(self, info, manual: bool) -> None:
+        from tkinter import messagebox
+        from .. import updater
+        self._update_info = info
+        if info:
+            self.update_btn.configure(text=f"⬆ Update to v{info.version}")
+            self.update_btn.pack(side="right", padx=8)
+            if manual and messagebox.askyesno(
+                    "Update available",
+                    f"Version {info.version} is available "
+                    f"(you have {updater.current_version()}).\n\nInstall now? "
+                    "The app will restart; your settings are kept."):
+                self._start_update()
+        elif manual:
+            messagebox.showinfo(
+                "Up to date",
+                f"You are on the latest version ({updater.current_version()}).")
+
+    def _start_update(self) -> None:
+        from tkinter import messagebox
+        from .. import updater
+        info = self._update_info
+        if not info:
+            return
+        if not updater.can_self_update():
+            messagebox.showinfo(
+                "Update", f"Version {info.version} is available. Rebuild the "
+                "exe from source to update (self-update needs the built exe).")
+            return
+        if not messagebox.askyesno(
+                "Install update",
+                f"Download and install v{info.version}? The app will close and "
+                "reopen on the new version. Your settings are preserved."):
+            return
+
+        top = ctk.CTkToplevel(self)
+        top.title("Updating")
+        top.geometry("360x110")
+        top.transient(self)
+        ctk.CTkLabel(top, text=f"Downloading v{info.version}…").pack(pady=(18, 6))
+        bar = ctk.CTkProgressBar(top, width=300)
+        bar.set(0)
+        bar.pack(pady=6)
+
+        def prog(frac):
+            self.after(0, lambda: bar.set(frac))
+
+        def work():
+            try:
+                updater.apply_update(info, progress=prog)
+                self.after(0, self._finish_update)
+            except Exception as exc:  # noqa: BLE001
+                self.after(0, lambda: self._update_failed(top, exc))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_update(self) -> None:
+        # The swap helper is waiting for us to exit, then relaunches.
+        self._on_close()
+
+    def _update_failed(self, top, exc) -> None:
+        from tkinter import messagebox
+        try:
+            top.destroy()
+        except Exception:  # noqa: BLE001
+            pass
+        messagebox.showerror("Update failed", str(exc))
 
     def _build_nav(self) -> None:
         groups = list(NAV_GROUPS)

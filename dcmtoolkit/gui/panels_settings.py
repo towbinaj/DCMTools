@@ -103,6 +103,14 @@ class SettingsPanel(ToolPanel):
         self.text_size.set(scale_name(self.app.settings.ui_scale))
         self.text_size.grid(row=0, column=5, padx=PAD)
 
+        from .. import updater
+        ctk.CTkLabel(top, text=f"Version {updater.current_version()}",
+                     text_color=MUTED).grid(row=1, column=0, padx=PAD,
+                                            pady=(0, PAD), sticky="w")
+        ctk.CTkButton(top, text="Check for updates", width=140,
+                      command=self._check_updates).grid(
+            row=1, column=1, padx=PAD, pady=(0, PAD), sticky="w")
+
         # Outgoing TLS (used by destinations flagged 'TLS')
         tlsf = ctk.CTkFrame(self.body)
         tlsf.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
@@ -209,6 +217,9 @@ class SettingsPanel(ToolPanel):
     def _delete_row(self, row: _DestRow) -> None:
         row.destroy()
         self._rows.remove(row)
+
+    def _check_updates(self) -> None:
+        self.app._check_updates_async(manual=True)
 
     def _change_appearance(self, mode: str) -> None:
         ctk.set_appearance_mode(mode)
