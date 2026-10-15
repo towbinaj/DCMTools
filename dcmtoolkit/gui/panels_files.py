@@ -408,11 +408,14 @@ class EnhancedPanel(_DropSourceMixin, ToolPanel):
                                     "each source)", text_color=MUTED)
         self.out_lbl.pack(side="left", padx=PAD)
 
-        self.new_series = ctk.CTkCheckBox(
-            self.body, text="New Series UID for the converted series "
-            "(recommended)")
+        opts = ctk.CTkFrame(self.body, fg_color="transparent")
+        opts.grid(row=2, column=0, sticky="w", padx=PAD, pady=(PAD, 0))
+        self.new_series = ctk.CTkCheckBox(opts, text="New Series UID (recommended)")
         self.new_series.select()
-        self.new_series.grid(row=2, column=0, sticky="w", padx=PAD, pady=(PAD, 0))
+        self.new_series.pack(side="left")
+        self.split_stacks = ctk.CTkCheckBox(
+            opts, text="Split stacks/dimensions into separate series")
+        self.split_stacks.pack(side="left", padx=PAD)
 
         btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
         btnbar.grid(row=3, column=0, sticky="w", padx=PAD, pady=PAD)
@@ -442,14 +445,16 @@ class EnhancedPanel(_DropSourceMixin, ToolPanel):
         files = list(self.files)
         total = len(files)
         new_series = bool(self.new_series.get())
+        split = bool(self.split_stacks.get())
         self.btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
         self.log.write(f"--- Converting {total:,} file(s) -> {out} "
-                       f"(new series: {'yes' if new_series else 'no'}) ---")
+                       f"(new series: {'yes' if new_series else 'no'}, "
+                       f"split stacks: {'yes' if split else 'no'}) ---")
 
         def worker():
             return enhanced.convert_enhanced(
-                files, out, new_series=new_series,
+                files, out, new_series=new_series, split_stacks=split,
                 on_item=self.runner.on_item,
                 should_cancel=lambda: self.runner.cancelled,
                 workers=self._get_workers())

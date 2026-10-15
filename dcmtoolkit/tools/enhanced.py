@@ -22,7 +22,10 @@ from pathlib import Path
 
 from pydicom import dcmread
 from pydicom.dataset import Dataset, FileMetaDataset
+from pydicom.tag import Tag
 from pydicom.uid import generate_uid, PYDICOM_IMPLEMENTATION_UID
+
+_INSTACK_TAG = Tag(0x0020, 0x9057)   # InStackPositionNumber
 
 from ..logging_setup import get_logger
 from .fileops import _run_pool
@@ -150,12 +153,66 @@ def _build_base(ds: Dataset) -> Dataset:
     return copy.deepcopy(base)
 
 
-def convert_file(src: Path, out_dir: Path, *, new_series: bool = True) -> tuple[int, str]:
-    """Convert one enhanced file to classic single-frame files in ``out_dir``.
+def _int(v, default: int = 0) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
 
-    Every standard-compatible functional-group attribute is flattened onto the
-    classic top level; enhanced-specific attributes are dropped. Returns
-    ``(frames_written, detail)``; 0 means skipped.
+
+def _spatial_index_pos(ds: Dataset):
+    """Position in DimensionIndexValues that indexes slice (in-stack) position,
+    so it can be ignored when grouping frames into series."""
+    seq = getattr(ds, "DimensionIndexSequence", None)
+    if not seq:
+        return None
+    for i, item in enumerate(seq):
+        ptr = getattr(item, "DimensionIndexPointer", None)
+        try:
+            if ptr is not None and Tag(ptr) == _INSTACK_TAG:
+                return i
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+def _frame_group_key(fg, spatial_pos):
+    """Series grouping key for a per-frame functional-group item: frames that
+    differ only in slice position share a key; different stacks / dimension
+    values (echo, type, ...) get different keys."""
+    fc = getattr(fg, "FrameContentSequence", None) if fg else None
+    item = fc[0] if fc else None
+    if item is None:
+        return ("solo",)
+    stack = getattr(item, "StackID", None)
+    div = getattr(item, "DimensionIndexValues", None)
+    if div is not None:
+        vals = [int(v) for v in div]
+        if spatial_pos is not None and 0 <= spatial_pos < len(vals):
+            vals = vals[:spatial_pos] + vals[spatial_pos + 1:]
+        return ("dim", tuple(vals), str(stack) if stack is not None else "")
+    if stack is not None:
+        return ("stack", str(stack))
+    return ("solo",)
+
+
+def _instack(fg, default: int) -> int:
+    fc = getattr(fg, "FrameContentSequence", None) if fg else None
+    if fc and "InStackPositionNumber" in fc[0]:
+        return _int(fc[0].InStackPositionNumber, default)
+    return default
+
+
+def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
+                 split_stacks: bool = False) -> tuple[int, str]:
+    """Convert one enhanced file to classic single-frame files under
+    ``out_dir / <source-stem>`` (one series subfolder per output series).
+
+    Functional-group attributes are flattened onto the classic top level and
+    enhanced-specific attributes dropped. With ``split_stacks``, frames are
+    grouped into separate classic series by StackID / dimension index (not just
+    slice position), each with its own SeriesInstanceUID, SeriesNumber and
+    1..N InstanceNumbers. Returns ``(frames_written, detail)``; 0 means skipped.
     """
     ds = dcmread(str(src), force=True)
     sop_class = str(getattr(ds, "SOPClassUID", ""))
@@ -177,66 +234,81 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True) -> tuple[
 
     get_frame_bytes, pixel_vr, encapsulated = _frame_bytes_fn(ds, n)
     ts = ds.file_meta.TransferSyntaxUID
-    series_uid = generate_uid() if new_series else str(ds.SeriesInstanceUID)
     src_class = sop_class
     src_inst = str(getattr(ds, "SOPInstanceUID", ""))
 
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # Group frames into output series.
+    spatial_pos = _spatial_index_pos(ds) if split_stacks else None
+    groups: dict = {}
+    if split_stacks:
+        for i in range(n):
+            fg = perframe[i] if i < len(perframe) else None
+            groups.setdefault(_frame_group_key(fg, spatial_pos), []).append(i)
+    else:
+        groups[("all",)] = list(range(n))
+    group_keys = list(groups.keys())
+    multi = len(group_keys) > 1
+
+    base_series_no = _int(getattr(ds, "SeriesNumber", 0))
+    base_desc = str(getattr(base, "SeriesDescription", "") or "")
+    obj_dir = Path(out_dir) / src.stem
     written = 0
-    for i in range(n):
-        fds = copy.deepcopy(base)
-        fg = perframe[i] if i < len(perframe) else None
-        _flatten(fds, fg)   # per-frame overrides shared
 
-        # Identity
-        fds.SOPClassUID = classic
-        sop_inst = generate_uid()
-        fds.SOPInstanceUID = sop_inst
-        fds.SeriesInstanceUID = series_uid
-        # Instance number: in-stack position if available, else frame order.
-        inst_no = i + 1
-        fc = getattr(fg, "FrameContentSequence", None) if fg else None
-        if fc and "InStackPositionNumber" in fc[0]:
-            try:
-                inst_no = int(fc[0].InStackPositionNumber)
-            except (TypeError, ValueError):
-                inst_no = i + 1
-        fds.InstanceNumber = inst_no
-        if fc and "FrameAcquisitionNumber" in fc[0]:
-            try:
-                fds.AcquisitionNumber = int(fc[0].FrameAcquisitionNumber)
-            except (TypeError, ValueError):
-                pass
-        if "ImageType" not in fds:
-            fds.ImageType = ["DERIVED", "SECONDARY"]
-        # Provenance: point back at the enhanced source.
-        ref = Dataset()
-        ref.ReferencedSOPClassUID = src_class
-        ref.ReferencedSOPInstanceUID = src_inst
-        fds.SourceImageSequence = [ref]
+    for gi, key in enumerate(group_keys):
+        # Order each series by slice (in-stack) position -> clean 1..N numbering.
+        idxs = sorted(groups[key],
+                      key=lambda i: _instack(
+                          perframe[i] if i < len(perframe) else None, i))
+        g_series_uid = (generate_uid() if (new_series or multi)
+                        else str(ds.SeriesInstanceUID))
+        g_series_no = base_series_no * 100 + (gi + 1) if multi else base_series_no
+        series_dir = (obj_dir / f"series{gi + 1:02d}") if multi else obj_dir
+        series_dir.mkdir(parents=True, exist_ok=True)
 
-        # Pixel data for this frame
-        fds.PixelData = get_frame_bytes(i)
-        fds["PixelData"].VR = pixel_vr
+        for inst_no, i in enumerate(idxs, start=1):
+            fg = perframe[i] if i < len(perframe) else None
+            fds = copy.deepcopy(base)
+            _flatten(fds, fg)   # per-frame overrides shared
 
-        # Fresh file meta for the classic instance
-        fm = FileMetaDataset()
-        fm.MediaStorageSOPClassUID = classic
-        fm.MediaStorageSOPInstanceUID = sop_inst
-        fm.TransferSyntaxUID = ts
-        fm.ImplementationClassUID = PYDICOM_IMPLEMENTATION_UID
-        fds.file_meta = fm
+            fds.SOPClassUID = classic
+            sop_inst = generate_uid()
+            fds.SOPInstanceUID = sop_inst
+            fds.SeriesInstanceUID = g_series_uid
+            fds.SeriesNumber = g_series_no
+            if multi:
+                fds.SeriesDescription = f"{base_desc} (stack {gi + 1})".strip()[:64]
+            fds.InstanceNumber = inst_no
+            fc = getattr(fg, "FrameContentSequence", None) if fg else None
+            if fc and "FrameAcquisitionNumber" in fc[0]:
+                fds.AcquisitionNumber = _int(fc[0].FrameAcquisitionNumber,
+                                             fds.get("AcquisitionNumber", 1))
+            if "ImageType" not in fds:
+                fds.ImageType = ["DERIVED", "SECONDARY"]
+            ref = Dataset()
+            ref.ReferencedSOPClassUID = src_class
+            ref.ReferencedSOPInstanceUID = src_inst
+            fds.SourceImageSequence = [ref]
 
-        dest = out_dir / f"{src.stem}_{i + 1:04d}.dcm"
-        fds.save_as(str(dest), enforce_file_format=True)
-        written += 1
-    return written, f"{written} frame(s) -> classic"
+            fds.PixelData = get_frame_bytes(i)
+            fds["PixelData"].VR = pixel_vr
+
+            fm = FileMetaDataset()
+            fm.MediaStorageSOPClassUID = classic
+            fm.MediaStorageSOPInstanceUID = sop_inst
+            fm.TransferSyntaxUID = ts
+            fm.ImplementationClassUID = PYDICOM_IMPLEMENTATION_UID
+            fds.file_meta = fm
+
+            fds.save_as(str(series_dir / f"{inst_no:04d}.dcm"),
+                        enforce_file_format=True)
+            written += 1
+
+    return written, f"{written} frame(s) -> {len(group_keys)} series"
 
 
 def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
-                     on_item=None, should_cancel=None,
-                     workers: int = 1) -> ConvertResult:
+                     split_stacks: bool = False, on_item=None,
+                     should_cancel=None, workers: int = 1) -> ConvertResult:
     files = [Path(f) for f in files]
     result = ConvertResult(files_in=len(files))
     total = len(files)
@@ -252,7 +324,8 @@ def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
             return
         ok, detail = True, "ok"
         try:
-            written, detail = convert_file(f, out_dir, new_series=new_series)
+            written, detail = convert_file(f, out_dir, new_series=new_series,
+                                           split_stacks=split_stacks)
             with lock:
                 if written:
                     result.converted += 1
