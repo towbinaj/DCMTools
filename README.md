@@ -187,7 +187,7 @@ The built exe can update itself from GitHub Releases:
 ### Releasing a new version (maintainer)
 
 Releases are driven by the **commit message** — no buttons, no manual tags.
-Put a `[release]` marker in a commit on `main` and CI
+Put the marker in a commit's **subject line** (the first line) on `main` and CI
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)) bumps the
 version, builds the exe on a Windows runner, and publishes it as a Release that
 every installed app then offers via self-update:

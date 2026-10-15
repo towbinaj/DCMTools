@@ -34,10 +34,13 @@ jobs:
             "tag=v$v"       | Out-File $env:GITHUB_OUTPUT -Append
             Write-Host "Manual tag release: v$v"
           } else {
-            $msg = @'
+            $full = @'
           ${{ github.event.head_commit.message }}
           '@
-            if ($msg -match '\[release(?:\s*[: ]\s*(major|minor|patch))?\]') {
+            # Only the commit SUBJECT (first line) can request a release, so
+            # explaining the marker in a commit body never triggers one.
+            $subject = ($full -split "`n")[0]
+            if ($subject -match '\[release(?:\s*[: ]\s*(major|minor|patch))?\]') {
               $bump = if ($Matches[1]) { $Matches[1] } else { 'patch' }
               $last = (git tag --list 'v*' --sort=-v:refname | Select-Object -First 1)
               if (-not $last) { $last = 'v0.0.0' }
