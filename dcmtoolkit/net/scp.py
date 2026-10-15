@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from pydicom.dataset import Dataset
 from pynetdicom import AE, evt, AllStoragePresentationContexts
 from pynetdicom.sop_class import Verification
 

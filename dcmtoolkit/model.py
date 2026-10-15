@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 
 
 AE_TITLE_MAX = 16

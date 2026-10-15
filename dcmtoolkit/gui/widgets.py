@@ -49,7 +49,10 @@ def run_threaded(widget, work: Callable[[], object],
             result = work()
         except Exception as exc:  # noqa: BLE001
             tb = traceback.format_exc()
-            widget.after(0, lambda: (on_error or _default_error)(exc, tb))
+            # Bind exc/tb as defaults: `exc` is unbound once the except block
+            # ends, so a bare closure would NameError when the lambda runs.
+            widget.after(0, lambda e=exc, t=tb:
+                         (on_error or _default_error)(e, t))
             return
         if on_done:
             widget.after(0, lambda: on_done(result))

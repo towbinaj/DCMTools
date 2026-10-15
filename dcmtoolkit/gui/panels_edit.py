@@ -15,7 +15,6 @@ from pydicom import dcmread
 from pydicom.datadict import tag_for_keyword
 from pydicom.tag import Tag
 
-from .. import config
 from ..tools import dicomtags, fileops
 from .base import ToolPanel
 from .batch import BatchRunner

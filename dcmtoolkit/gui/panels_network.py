@@ -18,8 +18,7 @@ from ..tools.fileops import find_dicom_files, expand_sources
 from .base import ToolPanel
 from .batch import BatchRunner
 from .theme import MUTED
-from .widgets import (DestinationPicker, build_drop_zone, run_threaded,
-                      section, PAD)
+from .widgets import (DestinationPicker, build_drop_zone, run_threaded, PAD)
 
 
 class EchoPanel(ToolPanel):

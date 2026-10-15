@@ -16,7 +16,7 @@ from ..store.naming import FORMATS
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .theme import MUTED
-from .widgets import run_threaded, PAD
+from .widgets import PAD
 
 
 def _split(text: str) -> list[str]:

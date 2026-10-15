@@ -126,7 +126,6 @@ def handle_cli(argv: list[str]) -> int:
 
 def _service_exe() -> str:
     """The executable Windows should run for the service."""
-    import os
     if getattr(sys, "frozen", False):
         return sys.executable
     # dev mode: run pythonw with -m dcmtoolkit.service_main

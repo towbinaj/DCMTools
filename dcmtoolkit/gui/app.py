@@ -101,7 +101,8 @@ class App(*_APP_BASES):
         self.content.grid_rowconfigure(0, weight=1)
         self.content.grid_columnconfigure(0, weight=1)
 
-        self.panels: dict[str, ctk.CTkFrame] = {}
+        self.panels: dict[str, ctk.CTkFrame] = {}      # built lazily on first open
+        self._panel_classes: dict[str, type] = {}
         self._buttons: dict[str, ctk.CTkButton] = {}
         self._build_nav()
 
@@ -124,9 +125,10 @@ class App(*_APP_BASES):
 
         # Restore the last-used tool, else show the first panel.
         self._current = ""
-        if self._buttons:
+        if self._panel_classes:
             last = self.settings.last_tool
-            self.select(last if last in self.panels else next(iter(self.panels)))
+            self.select(last if last in self._panel_classes
+                        else next(iter(self._panel_classes)))
 
         # Quiet background update check (built exe only).
         from .. import updater
@@ -195,7 +197,7 @@ class App(*_APP_BASES):
                 updater.apply_update(info, progress=prog)
                 self.after(0, self._finish_update)
             except Exception as exc:  # noqa: BLE001
-                self.after(0, lambda: self._update_failed(top, exc))
+                self.after(0, lambda e=exc: self._update_failed(top, e))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -226,10 +228,7 @@ class App(*_APP_BASES):
                                                  pady=(12, 2))
             for cls in panel_classes:
                 key = cls.__name__
-                panel = cls(self.content, self)
-                panel.grid(row=0, column=0, sticky="nsew")
-                panel.grid_remove()
-                self.panels[key] = panel
+                self._panel_classes[key] = cls   # instantiated on first select()
 
                 item = ctk.CTkFrame(self.sidebar, fg_color="transparent")
                 item.pack(fill="x", padx=8, pady=2)
@@ -248,13 +247,22 @@ class App(*_APP_BASES):
 
     def select(self, key: str) -> None:
         self._current = key
-        for k, panel in self.panels.items():
+        # Build the panel the first time it's opened (keeps startup fast).
+        panel = self.panels.get(key)
+        if panel is None:
+            cls = self._panel_classes.get(key)
+            if cls is None:
+                return
+            panel = cls(self.content, self)
+            panel.grid(row=0, column=0, sticky="nsew")
+            self.panels[key] = panel
+        for k, p in self.panels.items():
             if k == key:
-                panel.grid()
-                if hasattr(panel, "on_show"):
-                    panel.on_show()
+                p.grid()
+                if hasattr(p, "on_show"):
+                    p.on_show()
             else:
-                panel.grid_remove()
+                p.grid_remove()
         for k, btn in self._buttons.items():
             btn.configure(fg_color=("gray80", "gray28") if k == key
                           else "transparent")

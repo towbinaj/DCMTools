@@ -218,7 +218,6 @@ def c_store(my_aetitle: str, node: Node, files: Iterable[Path],
     from queue import Queue, Empty
 
     workers = max(1, min(int(workers), 16))
-    scheme = "TLS " if tls_args else ""
     progress(f"Proposing {len(contexts)} context(s). Sending {total:,} "
              f"file(s) over {workers} parallel association(s) to "
              f"{node.aetitle}@{node.host}:{node.port} ...")
