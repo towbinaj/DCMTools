@@ -42,6 +42,23 @@ def test_build_report_zip(tmp_path, monkeypatch):
     assert "DICOM Toolkit" in body
 
 
+def test_inline_body_keeps_description_scrubs_log(tmp_path, monkeypatch):
+    monkeypatch.setenv("DCMTOOLKIT_DATA", str(tmp_path))
+    # Seed a log line containing PHI-looking content.
+    logdir = tmp_path / "logs"
+    logdir.mkdir(parents=True, exist_ok=True)
+    (logdir / "dcmtoolkit.log").write_text(
+        "2026-01-01 [INFO] query DOE^JANE acc 123456789\n", encoding="utf-8")
+    s = config.Settings(my_aetitle="AE1")
+    body = support.inline_body("my own note with DOE^JANE", s, log_lines=20)
+    # The user's own words are preserved verbatim...
+    assert "my own note with DOE^JANE" in body
+    # ...but the auto-added log tail is scrubbed.
+    assert "123456789" not in body
+    assert body.count("DOE^JANE") == 1  # only the one in the description
+    assert "AE1" in body
+
+
 def test_mailto_url_prefills_subject():
     url = support.mailto_url("me@example.org", support.default_subject(), "hi")
     assert url.startswith("mailto:me@example.org?")

@@ -136,3 +136,17 @@ def report_body(zip_path: Path, settings=None) -> str:
         "- no images.)\n\n"
         f"{'-' * 40}\n{environment_info(settings)}\n"
     )
+
+
+def inline_body(description: str, settings=None, *, log_lines: int = 60) -> str:
+    """Self-contained email body: the user's description, the environment
+    summary, and a short PHI-scrubbed log tail inlined - so there is nothing to
+    attach. Capped so it fits in a mailto: without being truncated by the mail
+    client."""
+    return (
+        f"{description.strip() or '(no description given)'}\n\n"
+        f"{'-' * 40}\nDIAGNOSTICS (auto-added; no images, PHI-scrubbed)\n"
+        f"{'-' * 40}\n{environment_info(settings)}\n\n"
+        f"Recent activity log (last {log_lines} lines):\n"
+        f"{_log_tail(log_lines)}\n"
+    )
