@@ -40,7 +40,7 @@ class ToolPanel(ctk.CTkFrame):
         self.body.grid(row=1, column=0, sticky="ew", padx=PAD, pady=PAD)
         self.body.grid_columnconfigure(0, weight=1)
 
-        self.log = LogBox(self)
+        self.log = LogBox(self, logger_name=type(self).__name__)
         self.log.grid(row=2, column=0, sticky="nsew", padx=PAD, pady=(0, PAD))
         self.progress = ui_progress(self, self.log)
 

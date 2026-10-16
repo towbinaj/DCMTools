@@ -14,6 +14,7 @@ from typing import Callable
 import customtkinter as ctk
 
 from ..model import Node, DEST_GROUP_STORAGE
+from ..logging_setup import get_logger
 from .theme import MUTED, mono
 
 
@@ -21,17 +22,27 @@ PAD = 10
 
 
 class LogBox(ctk.CTkTextbox):
-    """A read-only, auto-scrolling text area for streaming progress."""
+    """A read-only, auto-scrolling text area for streaming progress.
 
-    def __init__(self, master, **kw):
+    Everything written here is also mirrored to the central rotating log file
+    (tagged with the tool name), so every tool leaves a persistent, timestamped
+    audit trail even though the on-screen box clears.
+    """
+
+    def __init__(self, master, logger_name: str = "", **kw):
         super().__init__(master, **kw)
         self.configure(state="disabled", wrap="word", font=mono(14))
+        self._logger = get_logger(logger_name) if logger_name else None
 
     def write(self, message: str) -> None:
         self.configure(state="normal")
         self.insert("end", message + "\n")
         self.see("end")
         self.configure(state="disabled")
+        if self._logger is not None:
+            for line in str(message).splitlines() or [""]:
+                if line.strip():
+                    self._logger.info(line)
 
     def clear(self) -> None:
         self.configure(state="normal")

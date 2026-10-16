@@ -58,6 +58,7 @@ class ConvertResult:
     files_in: int = 0
     converted: int = 0          # source enhanced files converted
     frames_written: int = 0     # classic instances produced
+    series_written: int = 0     # classic series produced
     skipped: int = 0            # not enhanced / unsupported
     errors: list[str] = field(default_factory=list)
 
@@ -204,7 +205,7 @@ def _instack(fg, default: int) -> int:
 
 
 def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
-                 split_stacks: bool = False) -> tuple[int, str]:
+                 split_stacks: bool = False) -> tuple[int, int, str]:
     """Convert one enhanced file to classic single-frame files under
     ``out_dir / <source-stem>`` (one series subfolder per output series).
 
@@ -212,15 +213,16 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
     enhanced-specific attributes dropped. With ``split_stacks``, frames are
     grouped into separate classic series by StackID / dimension index (not just
     slice position), each with its own SeriesInstanceUID, SeriesNumber and
-    1..N InstanceNumbers. Returns ``(frames_written, detail)``; 0 means skipped.
+    1..N InstanceNumbers. Returns ``(frames_written, series_written, detail)``;
+    0 frames means skipped.
     """
     ds = dcmread(str(src), force=True)
     sop_class = str(getattr(ds, "SOPClassUID", ""))
     classic = ENHANCED_TO_CLASSIC.get(sop_class)
     if classic is None:
-        return 0, f"skipped (not enhanced CT/MR/PET: {sop_class or 'no SOP'})"
+        return 0, 0, f"skipped (not enhanced CT/MR/PET: {sop_class or 'no SOP'})"
     if "PerFrameFunctionalGroupsSequence" not in ds:
-        return 0, "skipped (no per-frame functional groups)"
+        return 0, 0, "skipped (no per-frame functional groups)"
 
     n = int(getattr(ds, "NumberOfFrames", 0) or 0)
     perframe = ds.PerFrameFunctionalGroupsSequence
@@ -303,7 +305,7 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
                         enforce_file_format=True)
             written += 1
 
-    return written, f"{written} frame(s) -> {len(group_keys)} series"
+    return written, len(group_keys), f"{written} frame(s) -> {len(group_keys)} series"
 
 
 def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
@@ -324,12 +326,13 @@ def convert_enhanced(files, out_dir: Path, *, new_series: bool = True,
             return
         ok, detail = True, "ok"
         try:
-            written, detail = convert_file(f, out_dir, new_series=new_series,
-                                           split_stacks=split_stacks)
+            written, nseries, detail = convert_file(
+                f, out_dir, new_series=new_series, split_stacks=split_stacks)
             with lock:
                 if written:
                     result.converted += 1
                     result.frames_written += written
+                    result.series_written += nseries
                 else:
                     result.skipped += 1
         except Exception as exc:  # noqa: BLE001 - never abort the batch

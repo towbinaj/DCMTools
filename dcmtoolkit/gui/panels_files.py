@@ -452,16 +452,27 @@ class EnhancedPanel(_DropSourceMixin, ToolPanel):
                        f"(new series: {'yes' if new_series else 'no'}, "
                        f"split stacks: {'yes' if split else 'no'}) ---")
 
+        self._last_result = None
+
         def worker():
-            return enhanced.convert_enhanced(
+            res = enhanced.convert_enhanced(
                 files, out, new_series=new_series, split_stacks=split,
                 on_item=self.runner.on_item,
                 should_cancel=lambda: self.runner.cancelled,
                 workers=self._get_workers())
+            self._last_result = res
+            return res
 
         def on_done():
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
+            r = self._last_result
+            if r is not None:
+                self.log.write(
+                    f"[SUMMARY] converted {r.converted:,} enhanced file(s) "
+                    f"-> {r.frames_written:,} classic instance(s) in "
+                    f"{r.series_written:,} series; {r.skipped:,} skipped, "
+                    f"{len(r.errors):,} error(s).")
 
         self.runner.run(total, "enhanced", worker, on_done=on_done,
                         folder_totals=_folder_totals(files))

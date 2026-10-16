@@ -16,7 +16,7 @@ from .widgets import PAD
 
 
 class _DestRow(ctk.CTkFrame):
-    def __init__(self, master, node: Node, on_delete):
+    def __init__(self, master, node: Node, on_delete, on_group_change=None):
         super().__init__(master)
         self.grid_columnconfigure((0, 1, 2), weight=1)
         self.name = ctk.CTkEntry(self, placeholder_text="Name")
@@ -35,7 +35,9 @@ class _DestRow(ctk.CTkFrame):
         self.timeout.insert(0, str(node.timeout))
         self.timeout.grid(row=0, column=4, padx=2, pady=2)
         # Group: storage target vs worklist/MPPS server.
-        self.group = ctk.CTkOptionMenu(self, values=DEST_GROUPS, width=140)
+        self.group = ctk.CTkOptionMenu(
+            self, values=DEST_GROUPS, width=140,
+            command=(lambda _v: on_group_change()) if on_group_change else None)
         self.group.set(node.group if node.group in DEST_GROUPS
                        else DEST_GROUP_STORAGE)
         self.group.grid(row=0, column=5, padx=2, pady=2)
@@ -186,37 +188,61 @@ class SettingsPanel(ToolPanel):
     def _load_rows(self) -> None:
         for r in self._rows:
             r.destroy()
-        for h in getattr(self, "_headers", []):
-            h.destroy()
         self._rows = []
         self._headers = []
         # Alphabetical within each group; groups shown with a header.
         nodes = sorted(self.app.destinations,
                        key=lambda n: ((n.group or DEST_GROUP_STORAGE).lower(),
                                       n.name.lower()))
-        current = None
         for node in nodes:
-            grp = node.group or DEST_GROUP_STORAGE
-            if grp != current:
-                current = grp
-                hdr = ctk.CTkLabel(self.rows_frame, text=grp.upper(),
-                                   anchor="w", text_color=MUTED,
-                                   font=ctk.CTkFont(size=12, weight="bold"))
-                hdr.grid(sticky="w", padx=4, pady=(8, 0))
-                self._headers.append(hdr)
-            self._append_row(node)
+            self._rows.append(_DestRow(self.rows_frame, node,
+                                       on_delete=self._delete_row,
+                                       on_group_change=self._relayout))
+        self._relayout()
 
-    def _append_row(self, node: Node) -> None:
-        row = _DestRow(self.rows_frame, node, on_delete=self._delete_row)
-        row.grid(sticky="ew", pady=1)
-        self._rows.append(row)
+    def _relayout(self) -> None:
+        """(Re)place every row under a header for its *current* group value, so
+        a row always sits in the section matching its Group dropdown - including
+        a freshly added blank row and any row whose group was just changed."""
+        for h in getattr(self, "_headers", []):
+            h.destroy()
+        self._headers = []
+        rows = sorted(self._rows,
+                      key=lambda r: (r.group.get().lower(),
+                                     r.name.get().strip().lower()))
+        # Always show both group headers so it's obvious you can add to either.
+        current = None
+        for grp in DEST_GROUPS:
+            hdr = ctk.CTkLabel(self.rows_frame, text=grp.upper(), anchor="w",
+                               text_color=MUTED,
+                               font=ctk.CTkFont(size=12, weight="bold"))
+            hdr.grid(sticky="w", padx=4, pady=(8, 0))
+            self._headers.append(hdr)
+            for row in rows:
+                if row.group.get() == grp:
+                    row.grid_forget()
+                    row.grid(sticky="ew", pady=1)
 
     def _add_blank(self) -> None:
-        self._append_row(Node(name="", aetitle="", host="", port=104))
+        # New destinations default to PACS / Storage.
+        row = _DestRow(self.rows_frame,
+                       Node(name="", aetitle="", host="", port=104),
+                       on_delete=self._delete_row,
+                       on_group_change=self._relayout)
+        self._rows.append(row)
+        self._relayout()
+        row.name.focus_set()
+
+    def _append_row(self, node: Node) -> None:
+        """Add a row for ``node`` (caller calls ``_relayout`` when done)."""
+        self._rows.append(_DestRow(self.rows_frame, node,
+                                   on_delete=self._delete_row,
+                                   on_group_change=self._relayout))
 
     def _delete_row(self, row: _DestRow) -> None:
         row.destroy()
         self._rows.remove(row)
+        self._relayout()
 
     def _check_updates(self) -> None:
         self.app._check_updates_async(manual=True)
@@ -265,6 +291,8 @@ class SettingsPanel(ToolPanel):
                 self._append_row(n)
                 existing.add((n.aetitle.upper(), n.host, n.port))
                 added += 1
+        if added:
+            self._relayout()
         msg = [f"Imported {added} new destination(s) from "
                f"{', '.join(res.source_files)}."]
         if res.conflicts:

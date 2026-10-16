@@ -21,6 +21,44 @@ from .theme import MUTED
 from .widgets import (DestinationPicker, build_drop_zone, run_threaded, PAD)
 
 
+def _name_for_query(value: str) -> str:
+    """Make a Patient Name field forgiving for C-FIND.
+
+    DICOM matches Patient Name against the whole ``Last^First^Middle``
+    structure, so a bare surname like ``smith`` only matches a record whose
+    name is *exactly* ``smith`` with no given name. If the user didn't already
+    supply a wildcard (``*``/``?``) or a ``^`` component separator, append ``*``
+    so a plain surname does a prefix match (``smith`` -> ``smith*`` matches
+    ``SMITH^JOHN``). Empty stays empty (universal match / return key).
+    """
+    v = value.strip()
+    if not v or any(c in v for c in "*?^"):
+        return v
+    return v + "*"
+
+
+def _study_label(ds) -> str:
+    """One-line description of a C-FIND study match for the results dropdown,
+    including the Accession Number (blank if the archive didn't return one)."""
+    def g(attr):
+        return str(getattr(ds, attr, "") or "")
+    acc = g("AccessionNumber")
+    mod = g("ModalitiesInStudy")
+    n = g("NumberOfStudyRelatedInstances")
+    parts = [
+        g("PatientName") or "?",
+        g("PatientID") or "?",
+        f"Acc {acc}" if acc else "Acc -",
+        g("StudyDescription"),
+        g("StudyDate"),
+    ]
+    if mod:
+        parts.append(mod)
+    if n:
+        parts.append(f"{n} img")
+    return "  |  ".join(p for p in parts if p)
+
+
 class EchoPanel(ToolPanel):
     title = "C-Echo"
     description = "Verify connectivity to a remote DICOM node (DICOM ping)."
@@ -479,7 +517,12 @@ class QueryMovePanel(ToolPanel):
     def _criteria(self) -> dict[str, str]:
         c = {}
         for key, entry in self.fields.items():
-            c[key] = entry.get().strip()
+            val = entry.get().strip()
+            if key == "PatientName":
+                val = _name_for_query(val)
+            c[key] = val
+        if c.get("PatientName"):
+            self.log.write(f"Patient Name query: {c['PatientName']}")
         return c
 
     def _query(self) -> None:
@@ -492,6 +535,8 @@ class QueryMovePanel(ToolPanel):
         my_ae = self.app.settings.my_aetitle
         criteria = self._criteria()
         # Always request identifying return keys.
+        # AccessionNumber comes through **criteria (empty -> universal return
+        # key), so the response carries it back for display.
         ident = scu.build_query("STUDY",
                                 StudyInstanceUID="",
                                 StudyDescription="",
@@ -509,13 +554,7 @@ class QueryMovePanel(ToolPanel):
         def done(result):
             self._matches = result.datasets
             if result.datasets:
-                labels = []
-                for ds in result.datasets:
-                    labels.append(
-                        f"{getattr(ds, 'PatientName', '?')} | "
-                        f"{getattr(ds, 'PatientID', '?')} | "
-                        f"{getattr(ds, 'StudyDescription', '')} | "
-                        f"{getattr(ds, 'StudyDate', '')}")
+                labels = [_study_label(ds) for ds in result.datasets]
                 self.results.configure(values=labels)
                 self.results.set(labels[0])
                 self.move_btn.configure(state="normal")
@@ -645,6 +684,8 @@ class RetrievePanel(ToolPanel):
         criteria = {k: e.get().strip() for k, e in self.fields.items()}
         ident = scu.build_query("STUDY", StudyInstanceUID="",
                                 StudyDescription="", PatientName="",
+                                ModalitiesInStudy="",
+                                NumberOfStudyRelatedInstances="",
                                 **criteria)
         self.log.write("--- C-FIND ---")
         tls = self.app.tls_args_for(node)
@@ -657,10 +698,7 @@ class RetrievePanel(ToolPanel):
         def done(result):
             self._matches = result.datasets
             if result.datasets:
-                labels = [f"{getattr(d,'PatientName','?')} | "
-                          f"{getattr(d,'PatientID','?')} | "
-                          f"{getattr(d,'StudyDescription','')} | "
-                          f"{getattr(d,'StudyDate','')}" for d in result.datasets]
+                labels = [_study_label(d) for d in result.datasets]
                 self.results.configure(values=labels)
                 self.results.set(labels[0])
                 self.retrieve_btn.configure(state="normal")
