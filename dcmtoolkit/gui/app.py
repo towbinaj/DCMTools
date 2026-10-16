@@ -116,11 +116,10 @@ class App(*_APP_BASES):
             status, text=f"My AE: {self.settings.my_aetitle}",
             text_color=MUTED, font=ctk.CTkFont(size=11))
         self.ae_status.pack(side="right", padx=8)
-        ctk.CTkButton(status, text="Report a Bug", height=20, width=0,
-                      fg_color="transparent", text_color=MUTED,
-                      hover_color=("gray80", "gray28"),
-                      font=ctk.CTkFont(size=11),
-                      command=self._report_bug).pack(side="right", padx=4)
+        ctk.CTkButton(status, text="Report a Bug", height=20, width=100,
+                      fg_color="#b5651d", hover_color="#c8761f",
+                      font=ctk.CTkFont(size=11, weight="bold"),
+                      command=self._report_bug).pack(side="right", padx=6)
         # Update notice (hidden until an update is found).
         self._update_info = None
         self.update_btn = ctk.CTkButton(

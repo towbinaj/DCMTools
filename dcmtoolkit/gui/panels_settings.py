@@ -117,10 +117,14 @@ class SettingsPanel(ToolPanel):
         ctk.CTkLabel(top, text="Bug report email").grid(
             row=1, column=2, padx=PAD, pady=(0, PAD), sticky="e")
         self.bug_email = ctk.CTkEntry(
-            top, width=240, placeholder_text="where 'Report a Bug' sends")
+            top, width=200, placeholder_text="where 'Report a Bug' sends")
         self.bug_email.insert(0, self.app.settings.bug_report_email)
-        self.bug_email.grid(row=1, column=3, columnspan=3, padx=PAD,
+        self.bug_email.grid(row=1, column=3, columnspan=2, padx=PAD,
                             pady=(0, PAD), sticky="w")
+        ctk.CTkButton(top, text="Report a Bug", width=110,
+                      fg_color="#b5651d", hover_color="#c8761f",
+                      command=self.app._report_bug).grid(
+            row=1, column=5, padx=PAD, pady=(0, PAD), sticky="w")
 
         # Outgoing TLS (used by destinations flagged 'TLS')
         tlsf = ctk.CTkFrame(self.body)
