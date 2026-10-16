@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
@@ -588,6 +588,7 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.basic_profile = ctk.CTkCheckBox(
             form, text="DICOM PS3.15 Basic Confidentiality Profile "
             "(recommended)")
+        self.basic_profile.select()   # safe default: actually de-identify
         row("", self.basic_profile)
         self.retain_dates = ctk.CTkCheckBox(
             form, text="   └ retain study dates (longitudinal)")
@@ -738,6 +739,21 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             return
         out = self.out_dir or (self.files[0].parent / "deidentified")
         cfg = self._cfg()
+        # Safety net: warn if the chosen options won't strip patient identity
+        # (Basic Profile off and no anonymize-rules file -> name/ID/accession
+        # would pass through untouched).
+        if not cfg.basic_profile and not (cfg.anonymize_tags
+                                          and cfg.anonymize_file):
+            if not messagebox.askyesno(
+                    "De-identification is OFF",
+                    "The PS3.15 Basic Confidentiality Profile is unchecked and "
+                    "no anonymize-rules file is set.\n\n"
+                    "Patient Name, Patient ID, Accession Number and other "
+                    "identifiers will NOT be removed.\n\n"
+                    "Proceed anyway?"):
+                self.log.write("Cancelled: Basic Profile was off "
+                               "(no identifiers would be removed).")
+                return
         files = list(self.files)
         base = self.base_dir
         total = len(files)

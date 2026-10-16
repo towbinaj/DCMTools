@@ -9,7 +9,8 @@ import customtkinter as ctk
 
 from .. import config
 from ..importer import (import_legacy, import_any, export_csv, export_json)
-from ..model import Node, DEST_GROUPS, DEST_GROUP_STORAGE
+from ..model import (Node, DEST_GROUPS, DEST_GROUP_STORAGE,
+                     DEST_GROUP_WORKLIST)
 from .base import ToolPanel
 from .theme import MUTED, SCALE_OPTIONS, apply_scale, scale_name
 from .widgets import PAD
@@ -143,8 +144,12 @@ class SettingsPanel(ToolPanel):
         header.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(header, text="Destinations  (Tmo = timeout secs)",
                      font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
-        ctk.CTkButton(header, text="+ Add", width=70,
-                      command=self._add_blank).pack(side="right", padx=2)
+        ctk.CTkButton(header, text="+ Worklist / MPPS", width=140,
+                      command=lambda: self._add_blank(DEST_GROUP_WORKLIST)
+                      ).pack(side="right", padx=2)
+        ctk.CTkButton(header, text="+ PACS / Storage", width=140,
+                      command=lambda: self._add_blank(DEST_GROUP_STORAGE)
+                      ).pack(side="right", padx=2)
         ctk.CTkButton(header, text="Import file...", width=110,
                       command=self._import_file).pack(side="right", padx=2)
         ctk.CTkButton(header, text="Import legacy folder...", width=150,
@@ -223,10 +228,11 @@ class SettingsPanel(ToolPanel):
                     row.grid_forget()
                     row.grid(sticky="ew", pady=1)
 
-    def _add_blank(self) -> None:
-        # New destinations default to PACS / Storage.
+    def _add_blank(self, group: str = DEST_GROUP_STORAGE) -> None:
+        port = 104 if group == DEST_GROUP_STORAGE else 105
         row = _DestRow(self.rows_frame,
-                       Node(name="", aetitle="", host="", port=104),
+                       Node(name="", aetitle="", host="", port=port,
+                            group=group),
                        on_delete=self._delete_row,
                        on_group_change=self._relayout)
         self._rows.append(row)

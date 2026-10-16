@@ -14,6 +14,8 @@ def _phi_ct(study):
     ds.InstitutionName = "ACME HOSPITAL"          # (0008,0080) X -> removed
     ds.ReferringPhysicianName = "SMITH^BOB"       # (0008,0090) Z -> emptied
     ds.PatientAddress = "1 Main St"               # (0010,1040) X -> removed
+    ds.AccessionNumber = "ACC12345"               # (0008,0050) Z -> emptied
+    ds.PatientID = "MRN999"                       # (0010,0020) Z -> emptied
     ds.StudyDate = "20200101"
     ds.add_new(0x00090010, "LO", "PRIVATE CREATOR")   # private
     ds.add_new(0x00091001, "LO", "secret")            # private
@@ -26,6 +28,8 @@ def test_basic_profile_removes_phi_and_private():
     ds = proc.process(_phi_ct(generate_uid()))
     # Z-action identity attributes emptied; X-action removed
     assert str(ds.PatientName) == ""
+    assert str(ds.AccessionNumber) == ""
+    assert str(ds.PatientID) == ""
     assert "InstitutionName" not in ds
     assert "PatientAddress" not in ds
     # private tags gone
