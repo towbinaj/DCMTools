@@ -34,6 +34,7 @@ class PreviewPanel(ToolPanel):
         self._views: list[tuple[Path, int]] = []
         self._cache: "OrderedDict[Path, object]" = OrderedDict()
         self._img_ref = None
+        self._idx = 0
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_rowconfigure(2, weight=0)
@@ -48,18 +49,40 @@ class PreviewPanel(ToolPanel):
             side="left")
         ctk.CTkButton(bar, text="Open series folder...",
                       command=self._open_folder).pack(side="left", padx=PAD)
-        self.drop_hint = ctk.CTkLabel(
-            bar, text="…or drag a file or folder here", text_color=MUTED)
-        self.drop_hint.pack(side="left", padx=8)
-        if not self.app.enable_drop(bar, self._on_drop):
-            self.drop_hint.configure(text="")
 
         self.info = ctk.CTkLabel(self.body, text="No image loaded.", anchor="w",
                                  text_color=MUTED, justify="left")
         self.info.grid(row=1, column=0, sticky="w", padx=PAD)
 
-        self.image_lbl = ctk.CTkLabel(self.body, text="")
-        self.image_lbl.grid(row=2, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        # The whole central area is the drop zone: a bordered frame that fills
+        # the panel, with a clear placeholder and a drag-over highlight, so it's
+        # obvious where to drop a file or a series folder.
+        self._drop_border = ("gray60", "gray45")
+        self.drop = ctk.CTkFrame(self.body, border_width=2,
+                                 border_color=self._drop_border,
+                                 corner_radius=10)
+        self.drop.grid(row=2, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        self.drop.grid_rowconfigure(0, weight=1)
+        self.drop.grid_columnconfigure(0, weight=1)
+        self.image_lbl = ctk.CTkLabel(
+            self.drop, text="↓   Drop a DICOM file or a series folder here",
+            font=ctk.CTkFont(size=16, weight="bold"), text_color=MUTED)
+        self.image_lbl.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=PAD)
+
+        self._drop_ok = self.app.enable_drop(
+            self.drop, self._on_drop,
+            on_enter=self._drop_enter, on_leave=self._drop_leave)
+        self.app.enable_drop(self.image_lbl, self._on_drop,
+                             on_enter=self._drop_enter, on_leave=self._drop_leave)
+        if not self._drop_ok:
+            self.image_lbl.configure(
+                text="Open a DICOM file or a series folder using the buttons "
+                     "above\n(drag-and-drop unavailable on this system)")
+        # Mouse-wheel scrolls through the series (Windows/Mac delta + X11 buttons).
+        for target in (self.image_lbl, self.drop, self.info):
+            target.bind("<MouseWheel>", self._on_wheel)
+            target.bind("<Button-4>", self._on_wheel)
+            target.bind("<Button-5>", self._on_wheel)
 
         fb = ctk.CTkFrame(self.body, fg_color="transparent")
         fb.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
@@ -155,9 +178,37 @@ class PreviewPanel(ToolPanel):
 
         run_threaded(self, work, done, err)
 
+    def _drop_enter(self) -> None:
+        self.drop.configure(border_color="#4f9dde")
+        if not self._views:
+            self.image_lbl.configure(text="↓   Release to open")
+
+    def _drop_leave(self) -> None:
+        self.drop.configure(border_color=self._drop_border)
+        if not self._views:
+            self.image_lbl.configure(
+                text="↓   Drop a DICOM file or a series folder here")
+
     # -- display ---------------------------------------------------------
     def _on_slide(self, value) -> None:
         self._show_view(int(float(value)))
+
+    def _on_wheel(self, event) -> str:
+        """Scroll through the series with the mouse wheel."""
+        if len(self._views) < 2:
+            return "break"
+        # Wheel up (delta > 0, or X11 Button-4) -> previous image.
+        if getattr(event, "num", None) == 4:
+            step = -1
+        elif getattr(event, "num", None) == 5:
+            step = 1
+        else:
+            step = -1 if getattr(event, "delta", 0) > 0 else 1
+        new = max(0, min(self._idx + step, len(self._views) - 1))
+        if new != self._idx:
+            self.slider.set(new)
+            self._show_view(new)
+        return "break"
 
     def _read_ds(self, path: Path):
         ds = self._cache.get(path)
@@ -174,6 +225,7 @@ class PreviewPanel(ToolPanel):
         if not self._views:
             return
         idx = max(0, min(idx, len(self._views) - 1))
+        self._idx = idx
         path, frame = self._views[idx]
         total = len(self._views)
         pos = f"{idx + 1} / {total}" if total > 1 else "1 image"
