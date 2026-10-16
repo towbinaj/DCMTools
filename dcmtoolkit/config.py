@@ -35,6 +35,9 @@ class Settings:
     tls_key_file: str = ""
     # Remembered last-used destination per tool: {tool_key: destination_name}
     last_destinations: dict = field(default_factory=dict)
+    # Where "Report a Bug" sends reports (blank -> falls back to env var or the
+    # build-stamped address). Stored only in the local git-ignored settings.
+    bug_report_email: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

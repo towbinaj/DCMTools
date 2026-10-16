@@ -114,6 +114,14 @@ class SettingsPanel(ToolPanel):
                       command=self._check_updates).grid(
             row=1, column=1, padx=PAD, pady=(0, PAD), sticky="w")
 
+        ctk.CTkLabel(top, text="Bug report email").grid(
+            row=1, column=2, padx=PAD, pady=(0, PAD), sticky="e")
+        self.bug_email = ctk.CTkEntry(
+            top, width=240, placeholder_text="where 'Report a Bug' sends")
+        self.bug_email.insert(0, self.app.settings.bug_report_email)
+        self.bug_email.grid(row=1, column=3, columnspan=3, padx=PAD,
+                            pady=(0, PAD), sticky="w")
+
         # Outgoing TLS (used by destinations flagged 'TLS')
         tlsf = ctk.CTkFrame(self.body)
         tlsf.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
@@ -350,6 +358,7 @@ class SettingsPanel(ToolPanel):
         self.app.settings.tls_ca_file = self.tls_ca.get().strip()
         self.app.settings.tls_cert_file = self.tls_cert.get().strip()
         self.app.settings.tls_key_file = self.tls_key.get().strip()
+        self.app.settings.bug_report_email = self.bug_email.get().strip()
         config.save_settings(self.app.settings)
 
         nodes = self._collect_rows()

@@ -158,6 +158,28 @@ check (parsed to ~2.5 MB of JSON) and the compressed-pixel decoders
 runtime, and no image data is ever transmitted except the DICOM associations you
 start to destinations you configure.
 
+## Reporting bugs
+
+A **Report a Bug** button in the status bar opens a dialog for a description +
+repro steps and builds a small `bug_report_<timestamp>.zip` in `reports\`
+containing only **non-PHI** diagnostics (app version, OS, dependency versions,
+and a **PHI-scrubbed** tail of the activity log — no images). It then opens a
+pre-addressed email (subject *DICOM Toolkit bug report (vX.Y.Z)*) and reveals
+the zip so the reporter can attach it.
+
+The recipient address is **never stored in this public repo**. It is resolved
+at runtime from, in order:
+
+1. **Settings → Bug report email** (saved in your local, git-ignored
+   `settings.json`);
+2. the `DCMTOOLKIT_BUG_EMAIL` environment variable;
+3. a build-time value injected from the **`BUG_REPORT_EMAIL`** GitHub Actions
+   secret (set it under *Repo → Settings → Secrets and variables → Actions*).
+   CI stamps it into the released exe; the secret is never visible in the repo.
+
+If no address is configured, the zip is still created so it can be sent
+manually. The reporter always reviews the email before sending.
+
 ## Building the exe
 
 ```

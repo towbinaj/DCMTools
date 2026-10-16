@@ -116,6 +116,11 @@ class App(*_APP_BASES):
             status, text=f"My AE: {self.settings.my_aetitle}",
             text_color=MUTED, font=ctk.CTkFont(size=11))
         self.ae_status.pack(side="right", padx=8)
+        ctk.CTkButton(status, text="Report a Bug", height=20, width=0,
+                      fg_color="transparent", text_color=MUTED,
+                      hover_color=("gray80", "gray28"),
+                      font=ctk.CTkFont(size=11),
+                      command=self._report_bug).pack(side="right", padx=4)
         # Update notice (hidden until an update is found).
         self._update_info = None
         self.update_btn = ctk.CTkButton(
@@ -147,6 +152,10 @@ class App(*_APP_BASES):
                 pass   # window closed before the check returned
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _report_bug(self) -> None:
+        from .bugreport import BugReportDialog
+        BugReportDialog(self)
 
     def _on_update_result(self, info, manual: bool) -> None:
         from tkinter import messagebox

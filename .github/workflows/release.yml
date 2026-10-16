@@ -76,6 +76,21 @@ jobs:
             -replace '__version__\s*=\s*".*"', "__version__ = `"${{ steps.ver.outputs.version }}`"" |
             Set-Content dcmtoolkit/__init__.py
 
+      - name: Stamp bug-report email from secret
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
+        shell: pwsh
+        env:
+          BUG_EMAIL: ${{ secrets.BUG_REPORT_EMAIL }}
+        run: |
+          if ($env:BUG_EMAIL) {
+            (Get-Content dcmtoolkit/support.py) `
+              -replace '_BUILD_STAMPED_EMAIL = ""', "_BUILD_STAMPED_EMAIL = `"$env:BUG_EMAIL`"" |
+              Set-Content dcmtoolkit/support.py
+            Write-Host "Stamped bug-report email into the build."
+          } else {
+            Write-Host "No BUG_REPORT_EMAIL secret set; 'Report a Bug' relies on the Settings field."
+          }
+
       - name: Install dependencies
         if: ${{ success() && steps.ver.outputs.do == 'true' }}
         run: |
