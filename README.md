@@ -76,6 +76,22 @@ The legacy anonymize-by-file / morph / top-left pixel-blanking options remain.
 > burned-in pixel text. Use the Remove-Image options and/or the **Preview** /
 > **QA → Render** checks to catch burned-in PHI.
 
+### Anonymization profiles
+
+Instead of typing pipe-delimited tag lists, pick a saved **profile** at the top
+of the De-identify tool, or click **Manage profiles…** to build your own. A
+profile bundles the Basic-Profile / retain-dates / remove-private toggles with a
+table of per-tag rules, each with an action:
+
+- **Remove** — delete the tag
+- **Blank** — keep the tag but empty its value
+- **Replace** — set the tag to a fixed value
+- **Keep** — exempt the tag from the Basic Profile (do **not** anonymize it)
+
+Add tags by typing the 8-hex tag (the keyword is shown automatically) or from
+the **Common tags** menu. Profiles are saved in `anon_profiles.json` in the
+git-ignored data folder — they stay on your machine and are never committed.
+
 ## Running
 
 - **Users:** double-click `dist\DICOMToolkit.exe`. No Python install required.

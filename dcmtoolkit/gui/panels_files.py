@@ -585,6 +585,21 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         def entry(width=280):
             return ctk.CTkEntry(form, width=width)
 
+        # Anonymization profile selector: applies a saved profile's flags +
+        # per-tag rules. "Custom" means use the checkboxes/fields below as-is.
+        self._profile_rules: list = []
+        profbar = ctk.CTkFrame(form, fg_color="transparent")
+        self.profile_menu = ctk.CTkOptionMenu(
+            profbar, width=240, values=self._profile_names(),
+            command=self._on_profile)
+        self.profile_menu.set("Custom")
+        self.profile_menu.pack(side="left")
+        ctk.CTkButton(profbar, text="Manage profiles…", width=140,
+                      command=self._manage_profiles).pack(side="left", padx=PAD)
+        self.rules_lbl = ctk.CTkLabel(profbar, text="", text_color=MUTED)
+        self.rules_lbl.pack(side="left", padx=4)
+        row("Profile", profbar)
+
         self.basic_profile = ctk.CTkCheckBox(
             form, text="DICOM PS3.15 Basic Confidentiality Profile "
             "(recommended)")
@@ -709,6 +724,42 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.files = list(dict.fromkeys(Path(p) for p in requeue_paths))
         self._update_count()
 
+    # -- anonymization profiles -----------------------------------------
+    def _profile_names(self) -> list[str]:
+        from .. import anon_profiles as ap
+        return ["Custom"] + [p.name for p in ap.load_profiles()]
+
+    def _on_profile(self, name: str) -> None:
+        from .. import anon_profiles as ap
+        if name == "Custom":
+            self._profile_rules = []
+            self.rules_lbl.configure(text="")
+            return
+        prof = next((p for p in ap.load_profiles() if p.name == name), None)
+        if prof is None:
+            return
+        (self.basic_profile.select if prof.basic_profile
+         else self.basic_profile.deselect)()
+        (self.retain_dates.select if prof.retain_dates
+         else self.retain_dates.deselect)()
+        (self.rm_private.select if prof.remove_private
+         else self.rm_private.deselect)()
+        self._profile_rules = prof.custom_rules()
+        self.rules_lbl.configure(
+            text=f"{len(self._profile_rules)} tag rule(s)")
+
+    def _manage_profiles(self) -> None:
+        from .anon_dialog import AnonProfileDialog
+
+        def saved(active_name: str) -> None:
+            self.profile_menu.configure(values=self._profile_names())
+            if active_name in self._profile_names():
+                self.profile_menu.set(active_name)
+                self._on_profile(active_name)
+
+        AnonProfileDialog(self.app, on_saved=saved,
+                          select=self.profile_menu.get())
+
     def _cfg(self) -> ReceiverConfig:
         def to_int(s, d=0):
             try:
@@ -718,6 +769,7 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         return ReceiverConfig(
             basic_profile=bool(self.basic_profile.get()),
             retain_dates=bool(self.retain_dates.get()),
+            custom_rules=list(self._profile_rules),
             remove_private_tags=bool(self.rm_private.get()),
             remove_groups=_split(self.rm_groups.get()),
             remove_tags=_split(self.rm_tags.get()),

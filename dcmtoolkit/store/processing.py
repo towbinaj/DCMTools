@@ -52,6 +52,9 @@ class ReceiverConfig:
     remove_tags: list[str] = field(default_factory=list)     # ["00081040", ...]
     anonymize_tags: bool = False
     anonymize_file: str = ""
+    # Structured per-tag rules from an anonymization profile:
+    # (tag_hex, action, value) where action is REMOVE|BLANK|REPLACE|KEEP.
+    custom_rules: list = field(default_factory=list)
     # DICOM PS3.15 Basic Application Confidentiality Profile (standards-based).
     basic_profile: bool = False
     retain_dates: bool = False   # Retain Longitudinal Temporal Info (study dates)
@@ -67,8 +70,18 @@ class ReceiverConfig:
 
 
 def _parse_tag(s: str) -> Tag:
-    s = s.strip()
-    return Tag(int(s[:4], 16), int(s[4:], 16))
+    s = s.strip().replace(",", "").replace("x", "")
+    return Tag(int(s[:4], 16), int(s[4:8], 16))
+
+
+def _vr_for(tag: Tag) -> str:
+    """Dictionary VR for a tag, defaulting to LO for unknown/private tags."""
+    from pydicom.datadict import dictionary_VR
+    try:
+        vr = dictionary_VR(tag)
+        return "LO" if vr in ("UN", "OB", "OW", "SQ") else vr
+    except KeyError:
+        return "LO"
 
 
 def _parse_date(v: str) -> date | None:
@@ -89,8 +102,28 @@ class Processor:
         self._uid_map: dict[str, str] = {}
         self._uid_lock = threading.Lock()
         self._anon_rules = self._load_anon_rules()
+        self._keep_tags, self._custom_mods = self._load_custom_rules()
         self._morph_format = self._load_morph_format()
         self._morph_table = self._load_morph_table()
+
+    def _load_custom_rules(self):
+        """Split profile rules into KEEP tags (exempt from the Basic Profile)
+        and modify rules (REMOVE/BLANK/REPLACE) applied after it."""
+        keep: list[Tag] = []
+        mods: list[tuple[Tag, str, str]] = []
+        for item in self.cfg.custom_rules or []:
+            try:
+                tag_hex, action, value = (list(item) + ["", "", ""])[:3]
+                tag = _parse_tag(tag_hex)
+            except (ValueError, TypeError):
+                log.warning("Bad custom anonymize rule: %r", item)
+                continue
+            action = (action or "").upper()
+            if action == "KEEP":
+                keep.append(tag)
+            elif action in ("REMOVE", "BLANK", "REPLACE"):
+                mods.append((tag, action, value or ""))
+        return keep, mods
 
     # -- loading ---------------------------------------------------------
     def _load_anon_rules(self) -> list[tuple[Tag, str]]:
@@ -147,6 +180,9 @@ class Processor:
             ds.remove_private_tags()   # the Basic Profile already removes these
         self._apply_remove_groups(ds)
         self._apply_remove_tags(ds)
+        # Structured profile rules (REMOVE/BLANK/REPLACE) always apply when set;
+        # KEEP rules were already honoured inside the Basic Profile above.
+        self._apply_custom_mods(ds)
         if self.cfg.anonymize_tags:
             if self.cfg.calculated_dates:
                 self._apply_calculated_dates(ds)
@@ -182,6 +218,9 @@ class Processor:
         if self.cfg.retain_dates:
             for t in self._RETAIN_DATE_TAGS:
                 extra[(t >> 16, t & 0xFFFF)] = _keep
+        # Profile KEEP rules: exempt these tags from the Basic Profile.
+        for tag in self._keep_tags:
+            extra[(tag.group, tag.element)] = _keep
         with _ANON_LOCK:
             anonymize_dataset(ds, extra_anonymization_rules=extra,
                               delete_private_tags=True)
@@ -215,6 +254,24 @@ class Processor:
                 continue
             if tag in ds:
                 del ds[tag]
+
+    def _apply_custom_mods(self, ds: Dataset) -> None:
+        """Apply profile REMOVE/BLANK/REPLACE rules (KEEP handled earlier)."""
+        for tag, action, value in self._custom_mods:
+            if action == "REMOVE":
+                if tag in ds:
+                    del ds[tag]
+            elif action == "BLANK":
+                if tag in ds:
+                    ds[tag].value = ""
+            elif action == "REPLACE":
+                if tag in ds:
+                    ds[tag].value = value
+                else:
+                    try:
+                        ds.add_new(tag, _vr_for(tag), value)
+                    except Exception:  # noqa: BLE001 - unknown VR / bad value
+                        pass
 
     def _apply_anon_rules(self, ds: Dataset) -> None:
         for tag, option in self._anon_rules:
