@@ -115,68 +115,73 @@ class SettingsPanel(ToolPanel):
         self.log.grid_remove()
         self.grid_rowconfigure(1, weight=1)
 
-        # Identity + appearance
+        # Identity + appearance - a simple labelled form (label | control[s]),
+        # so each control's meaning and its hint are unambiguous.
         top = ctk.CTkFrame(self.body)
         top.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkLabel(top, text="My AE Title").grid(row=0, column=0, padx=PAD,
-                                                   pady=PAD, sticky="w")
-        self.my_ae = ctk.CTkEntry(top, width=200)
+        top.grid_columnconfigure(1, weight=1)
+        self._form_row = 0
+
+        def frow(label: str) -> ctk.CTkFrame:
+            r = self._form_row
+            ctk.CTkLabel(top, text=label, anchor="w", width=130).grid(
+                row=r, column=0, padx=PAD, pady=(PAD if r == 0 else 5, 5),
+                sticky="w")
+            cell = ctk.CTkFrame(top, fg_color="transparent")
+            cell.grid(row=r, column=1, padx=PAD,
+                      pady=(PAD if r == 0 else 5, 5), sticky="w")
+            self._form_row += 1
+            return cell
+
+        # My AE Title (+ inline validation message to its right)
+        c = frow("My AE Title")
+        self.my_ae = ctk.CTkEntry(c, width=220)
         self.my_ae.insert(0, self.app.settings.my_aetitle)
-        self.my_ae.grid(row=0, column=1, padx=PAD, pady=PAD, sticky="w")
+        self.my_ae.pack(side="left")
         self._ae_def_border = self.my_ae.cget("border_color")
         self.my_ae.bind("<FocusOut>", lambda _e: self._autosave())
         self.my_ae.bind("<KeyRelease>", lambda _e: self._validate_my_ae())
-        # Inline validation message, right under the My AE Title field.
-        self.ae_warn = ctk.CTkLabel(top, text="", text_color="#d9695f",
+        self.ae_warn = ctk.CTkLabel(c, text="", text_color="#d9695f",
                                     anchor="w", font=ctk.CTkFont(size=11))
-        self.ae_warn.grid(row=1, column=0, columnspan=2, padx=PAD,
-                          pady=(0, 2), sticky="w")
+        self.ae_warn.pack(side="left", padx=10)
 
-        ctk.CTkLabel(top, text="Appearance").grid(row=0, column=2, padx=PAD)
+        # Appearance
+        c = frow("Appearance")
         self.appearance = ctk.CTkOptionMenu(
-            top, values=["system", "light", "dark"],
+            c, values=["system", "light", "dark"],
             command=self._change_appearance)
         self.appearance.set(self.app.settings.appearance)
-        self.appearance.grid(row=0, column=3, padx=PAD)
+        self.appearance.pack(side="left")
 
-        ctk.CTkLabel(top, text="UI scale").grid(row=0, column=4, padx=PAD)
-        # Rescaling is a heavy full re-layout in CustomTkinter. Picking a scale
-        # saves instantly and takes effect next launch; "Apply now" does the
-        # one-time repaint on demand, so the user chooses when to pay for it.
-        scalebar = ctk.CTkFrame(top, fg_color="transparent")
-        scalebar.grid(row=0, column=5, padx=PAD, sticky="w")
-        self.text_size = ctk.CTkOptionMenu(scalebar, width=80,
+        # UI scale (menu + Apply now + a hint that clearly belongs to this row)
+        c = frow("UI scale")
+        self.text_size = ctk.CTkOptionMenu(c, width=90,
                                            values=list(SCALE_OPTIONS),
                                            command=self._on_scale_pick)
         self.text_size.set(scale_name(self.app.settings.ui_scale))
         self.text_size.pack(side="left")
-        ctk.CTkButton(scalebar, text="Apply now", width=80,
-                      command=self._apply_scale_now).pack(side="left",
-                                                          padx=(6, 0))
-        ctk.CTkLabel(top, text="(saved now; applies on restart, or Apply now)",
-                     text_color=MUTED, font=ctk.CTkFont(size=11)).grid(
-            row=1, column=4, columnspan=2, padx=PAD, pady=(0, 2), sticky="w")
+        ctk.CTkButton(c, text="Apply now", width=90,
+                      command=self._apply_scale_now).pack(side="left", padx=6)
+        ctk.CTkLabel(c, text="saved instantly; the resize runs on restart, "
+                     "or click Apply now", text_color=MUTED,
+                     font=ctk.CTkFont(size=11)).pack(side="left", padx=6)
 
-        from .. import updater
-        ctk.CTkLabel(top, text=f"Version {updater.current_version()}",
-                     text_color=MUTED).grid(row=2, column=0, padx=PAD,
-                                            pady=(0, PAD), sticky="w")
-        ctk.CTkButton(top, text="Check for updates", width=140,
-                      command=self._check_updates).grid(
-            row=2, column=1, padx=PAD, pady=(0, PAD), sticky="w")
-
-        ctk.CTkLabel(top, text="Bug report email").grid(
-            row=2, column=2, padx=PAD, pady=(0, PAD), sticky="e")
+        # Bug report email (+ Report a Bug button)
+        c = frow("Bug report email")
         self.bug_email = ctk.CTkEntry(
-            top, width=200, placeholder_text="where 'Report a Bug' sends")
+            c, width=240, placeholder_text="where 'Report a Bug' sends")
         self.bug_email.insert(0, self.app.settings.bug_report_email)
-        self.bug_email.grid(row=2, column=3, columnspan=2, padx=PAD,
-                            pady=(0, PAD), sticky="w")
+        self.bug_email.pack(side="left")
         self.bug_email.bind("<FocusOut>", lambda _e: self._autosave())
-        ctk.CTkButton(top, text="Report a Bug", width=110,
-                      fg_color="#b5651d", hover_color="#c8761f",
-                      command=self.app._report_bug).grid(
-            row=2, column=5, padx=PAD, pady=(0, PAD), sticky="w")
+        ctk.CTkButton(c, text="Report a Bug", width=120, fg_color="#b5651d",
+                      hover_color="#c8761f",
+                      command=self.app._report_bug).pack(side="left", padx=10)
+
+        # Version + updates
+        from .. import updater
+        c = frow(f"Version {updater.current_version()}")
+        ctk.CTkButton(c, text="Check for updates", width=150,
+                      command=self._check_updates).pack(side="left")
 
         # Outgoing TLS (used by destinations flagged 'TLS')
         tlsf = ctk.CTkFrame(self.body)
