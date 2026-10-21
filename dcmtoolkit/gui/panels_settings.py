@@ -17,8 +17,10 @@ from .widgets import PAD
 
 
 class _DestRow(ctk.CTkFrame):
-    def __init__(self, master, node: Node, on_delete, on_group_change=None):
+    def __init__(self, master, node: Node, on_delete, on_group_change=None,
+                 on_change=None):
         super().__init__(master)
+        self._on_change = on_change
         self.grid_columnconfigure((0, 1, 2), weight=1)
         self.name = ctk.CTkEntry(self, placeholder_text="Name")
         self.name.insert(0, node.name)
@@ -35,10 +37,15 @@ class _DestRow(ctk.CTkFrame):
         self.timeout = ctk.CTkEntry(self, width=52, placeholder_text="Tmo")
         self.timeout.insert(0, str(node.timeout))
         self.timeout.grid(row=0, column=4, padx=2, pady=2)
+
+        def group_cmd(_v):
+            if on_group_change:
+                on_group_change()
+            self._changed()
+
         # Group: storage target vs worklist/MPPS server.
-        self.group = ctk.CTkOptionMenu(
-            self, values=DEST_GROUPS, width=140,
-            command=(lambda _v: on_group_change()) if on_group_change else None)
+        self.group = ctk.CTkOptionMenu(self, values=DEST_GROUPS, width=140,
+                                       command=group_cmd)
         self.group.set(node.group if node.group in DEST_GROUPS
                        else DEST_GROUP_STORAGE)
         self.group.grid(row=0, column=5, padx=2, pady=2)
@@ -47,7 +54,8 @@ class _DestRow(ctk.CTkFrame):
                                     placeholder_text="Calling AE (opt)")
         self.calling.insert(0, node.calling_aetitle)
         self.calling.grid(row=0, column=6, padx=2, pady=2)
-        self.tls = ctk.CTkCheckBox(self, text="TLS", width=48)
+        self.tls = ctk.CTkCheckBox(self, text="TLS", width=48,
+                                   command=self._changed)
         if node.tls:
             self.tls.select()
         self.tls.grid(row=0, column=7, padx=2, pady=2)
@@ -55,6 +63,14 @@ class _DestRow(ctk.CTkFrame):
                       hover_color="#c44",
                       command=lambda: on_delete(self)).grid(
             row=0, column=8, padx=2)
+        # Autosave when a field loses focus.
+        for e in (self.name, self.aet, self.host, self.port, self.timeout,
+                  self.calling):
+            e.bind("<FocusOut>", lambda _ev: self._changed())
+
+    def _changed(self) -> None:
+        if self._on_change:
+            self._on_change()
 
     def to_node(self) -> Node | None:
         if not self.aet.get().strip() and not self.host.get().strip():
@@ -92,6 +108,7 @@ class SettingsPanel(ToolPanel):
         self.my_ae = ctk.CTkEntry(top, width=200)
         self.my_ae.insert(0, self.app.settings.my_aetitle)
         self.my_ae.grid(row=0, column=1, padx=PAD, pady=PAD, sticky="w")
+        self.my_ae.bind("<FocusOut>", lambda _e: self._autosave())
 
         ctk.CTkLabel(top, text="Appearance").grid(row=0, column=2, padx=PAD)
         self.appearance = ctk.CTkOptionMenu(
@@ -101,14 +118,13 @@ class SettingsPanel(ToolPanel):
         self.appearance.grid(row=0, column=3, padx=PAD)
 
         ctk.CTkLabel(top, text="UI scale").grid(row=0, column=4, padx=PAD)
-        # Rescaling is a heavy full re-layout in CustomTkinter, so it is applied
-        # once on Save (not live on every pick) and skipped when unchanged.
-        self.text_size = ctk.CTkOptionMenu(top, values=list(SCALE_OPTIONS))
+        # Rescaling is a heavy full re-layout in CustomTkinter, so the (auto-
+        # saved) choice is applied on a short debounce and skipped when
+        # unchanged - picking through options doesn't repaint repeatedly.
+        self.text_size = ctk.CTkOptionMenu(top, values=list(SCALE_OPTIONS),
+                                           command=self._on_scale_pick)
         self.text_size.set(scale_name(self.app.settings.ui_scale))
         self.text_size.grid(row=0, column=5, padx=PAD)
-        ctk.CTkLabel(top, text="(applies on Save)", text_color=MUTED,
-                     font=ctk.CTkFont(size=11)).grid(
-            row=1, column=4, columnspan=2, padx=PAD, pady=(0, PAD), sticky="w")
 
         from .. import updater
         ctk.CTkLabel(top, text=f"Version {updater.current_version()}",
@@ -125,6 +141,7 @@ class SettingsPanel(ToolPanel):
         self.bug_email.insert(0, self.app.settings.bug_report_email)
         self.bug_email.grid(row=1, column=3, columnspan=2, padx=PAD,
                             pady=(0, PAD), sticky="w")
+        self.bug_email.bind("<FocusOut>", lambda _e: self._autosave())
         ctk.CTkButton(top, text="Report a Bug", width=110,
                       fg_color="#b5651d", hover_color="#c8761f",
                       command=self.app._report_bug).grid(
@@ -136,7 +153,8 @@ class SettingsPanel(ToolPanel):
         ctk.CTkLabel(tlsf, text="Client TLS (for TLS destinations):",
                      font=ctk.CTkFont(weight="bold")).grid(
             row=0, column=0, columnspan=3, padx=PAD, pady=(PAD, 2), sticky="w")
-        self.tls_verify = ctk.CTkCheckBox(tlsf, text="Verify server certificate")
+        self.tls_verify = ctk.CTkCheckBox(tlsf, text="Verify server certificate",
+                                          command=self._autosave)
         if self.app.settings.tls_verify:
             self.tls_verify.select()
         self.tls_verify.grid(row=0, column=3, padx=PAD, sticky="w")
@@ -181,9 +199,14 @@ class SettingsPanel(ToolPanel):
         self._rows: list[_DestRow] = []
         self._load_rows()
 
-        ctk.CTkButton(self.body, text="Save settings + destinations",
-                      command=self._save).grid(row=4, column=0, sticky="w",
-                                               padx=PAD, pady=PAD)
+        # Everything autosaves; this label just confirms it.
+        self.saved_lbl = ctk.CTkLabel(self.body, text="Changes save automatically",
+                                      text_color=MUTED, anchor="w")
+        self.saved_lbl.grid(row=4, column=0, sticky="w", padx=PAD, pady=PAD)
+
+        self._applied_scale = self.app.settings.ui_scale
+        self._scale_after = None
+        self._loaded = True   # enable autosave now that widgets are populated
 
     def _file_row(self, parent, row: int, label: str, value: str):
         ctk.CTkLabel(parent, text=label, anchor="w", width=200).grid(
@@ -193,6 +216,7 @@ class SettingsPanel(ToolPanel):
             entry.insert(0, value)
         entry.grid(row=row, column=1, columnspan=2, padx=PAD, pady=2,
                    sticky="ew")
+        entry.bind("<FocusOut>", lambda _e: self._autosave())
         ctk.CTkButton(parent, text="...", width=32,
                       command=lambda: self._browse_file(entry)).grid(
             row=row, column=3, padx=PAD, pady=2)
@@ -205,6 +229,7 @@ class SettingsPanel(ToolPanel):
         if f:
             entry.delete(0, "end")
             entry.insert(0, f)
+            self._autosave()
 
     def _load_rows(self) -> None:
         for r in self._rows:
@@ -218,7 +243,8 @@ class SettingsPanel(ToolPanel):
         for node in nodes:
             self._rows.append(_DestRow(self.rows_frame, node,
                                        on_delete=self._delete_row,
-                                       on_group_change=self._relayout))
+                                       on_group_change=self._relayout,
+                                       on_change=self._autosave))
         self._relayout()
 
     def _relayout(self) -> None:
@@ -250,28 +276,80 @@ class SettingsPanel(ToolPanel):
                        Node(name="", aetitle="", host="", port=port,
                             group=group),
                        on_delete=self._delete_row,
-                       on_group_change=self._relayout)
+                       on_group_change=self._relayout,
+                       on_change=self._autosave)
         self._rows.append(row)
         self._relayout()
         row.name.focus_set()
+        # New blank row has no AE/host yet, so _autosave won't persist it until
+        # it's filled in (to_node skips empty rows).
 
     def _append_row(self, node: Node) -> None:
         """Add a row for ``node`` (caller calls ``_relayout`` when done)."""
         self._rows.append(_DestRow(self.rows_frame, node,
                                    on_delete=self._delete_row,
-                                   on_group_change=self._relayout))
+                                   on_group_change=self._relayout,
+                                   on_change=self._autosave))
 
     def _delete_row(self, row: _DestRow) -> None:
         row.destroy()
         self._rows.remove(row)
         self._relayout()
+        self._autosave()
 
     def _check_updates(self) -> None:
         self.app._check_updates_async(manual=True)
 
     def _change_appearance(self, mode: str) -> None:
         ctk.set_appearance_mode(mode)
+        self._autosave()
 
+    # -- autosave --------------------------------------------------------
+    def _autosave(self) -> None:
+        """Persist settings + destinations immediately (no Save button). Called
+        from field focus-out, toggles, and row edits. The heavy UI rescale is
+        NOT done here - only the value is stored; `_on_scale_pick` applies it."""
+        if not getattr(self, "_loaded", False):
+            return
+        s = self.app.settings
+        s.my_aetitle = self.my_ae.get().strip() or "DICOMTOOLKIT"
+        s.appearance = self.appearance.get()
+        s.ui_scale = SCALE_OPTIONS.get(self.text_size.get(), DEFAULT_SCALE)
+        s.tls_verify = bool(self.tls_verify.get())
+        s.tls_ca_file = self.tls_ca.get().strip()
+        s.tls_cert_file = self.tls_cert.get().strip()
+        s.tls_key_file = self.tls_key.get().strip()
+        s.bug_report_email = self.bug_email.get().strip()
+        try:
+            config.save_settings(s)
+            nodes = self._collect_rows()
+            self.app.destinations = nodes
+            config.save_destinations(nodes)
+            self.app.broadcast_destinations_changed()
+            self._flash_saved(f"Saved ({len(nodes)} destination(s))")
+        except Exception as exc:  # noqa: BLE001
+            self._flash_saved(f"Save failed: {exc}", ok=False)
+
+    def _flash_saved(self, text: str, ok: bool = True) -> None:
+        if hasattr(self, "saved_lbl"):
+            self.saved_lbl.configure(
+                text=f"✓ {text}" if ok else f"⚠ {text}",
+                text_color=(MUTED if ok else "#d9695f"))
+
+    def _on_scale_pick(self, _name: str) -> None:
+        # Persist the choice now (cheap); apply the heavy rescale on a short
+        # debounce so flicking through options doesn't repaint each time.
+        self._autosave()
+        if self._scale_after is not None:
+            self.after_cancel(self._scale_after)
+        self._scale_after = self.after(450, self._apply_scale_now)
+
+    def _apply_scale_now(self) -> None:
+        self._scale_after = None
+        val = SCALE_OPTIONS.get(self.text_size.get(), DEFAULT_SCALE)
+        if abs(val - self._applied_scale) > 1e-6:
+            apply_scale(val)
+            self._applied_scale = val
 
     def _import_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -312,6 +390,7 @@ class SettingsPanel(ToolPanel):
                 added += 1
         if added:
             self._relayout()
+            self._autosave()
         msg = [f"Imported {added} new destination(s) from "
                f"{', '.join(res.source_files)}."]
         if res.conflicts:
@@ -354,26 +433,3 @@ class SettingsPanel(ToolPanel):
                 nodes.append(n)
         return nodes
 
-    def _save(self) -> None:
-        self.app.settings.my_aetitle = self.my_ae.get().strip() or "DICOMTOOLKIT"
-        self.app.settings.appearance = self.appearance.get()
-        new_scale = SCALE_OPTIONS.get(self.text_size.get(), DEFAULT_SCALE)
-        scale_changed = abs(new_scale - self.app.settings.ui_scale) > 1e-6
-        self.app.settings.ui_scale = new_scale
-        self.app.settings.tls_verify = bool(self.tls_verify.get())
-        self.app.settings.tls_ca_file = self.tls_ca.get().strip()
-        self.app.settings.tls_cert_file = self.tls_cert.get().strip()
-        self.app.settings.tls_key_file = self.tls_key.get().strip()
-        self.app.settings.bug_report_email = self.bug_email.get().strip()
-        config.save_settings(self.app.settings)
-
-        nodes = self._collect_rows()
-        self.app.destinations = nodes
-        config.save_destinations(nodes)
-        self.app.broadcast_destinations_changed()
-        messagebox.showinfo("Saved",
-                            f"Saved settings and {len(nodes)} destination(s).")
-        # Apply the (heavy) rescale last, only when it actually changed, so a
-        # normal Save doesn't pay for a full re-layout.
-        if scale_changed:
-            apply_scale(new_scale)

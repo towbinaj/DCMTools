@@ -132,8 +132,10 @@ back to `%APPDATA%\DICOMToolkit` if that location is read-only):
 
 ### Destinations
 
-Add them on the **Settings** tab (inline **+ Add**, **Import** CSV/JSON, or
-**Import legacy folder** of old `DCM*.csv`), then **Save**. Two refinements:
+Add them on the **Settings** tab (**+ PACS / Storage** or **+ Worklist / MPPS**,
+**Import** CSV/JSON, or **Import legacy folder** of old `DCM*.csv`). Everything
+on the Settings tab **saves automatically** — there's no Save button; a line at
+the bottom confirms each change. Two refinements:
 
 - **Group** — *PACS / Storage* (default) or *Worklist / MPPS*. Storage tools
   show only storage destinations; the Modality SCU's worklist picker shows only
