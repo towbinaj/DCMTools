@@ -67,8 +67,23 @@ class _DestRow(ctk.CTkFrame):
         for e in (self.name, self.aet, self.host, self.port, self.timeout,
                   self.calling):
             e.bind("<FocusOut>", lambda _ev: self._changed())
+        # Live AE-title feedback right on the cell.
+        self._def_border = self.aet.cget("border_color")
+        for e in (self.aet, self.calling):
+            e.bind("<KeyRelease>", lambda _ev: self._validate_fields())
+        self._validate_fields()
+
+    def _validate_fields(self) -> None:
+        self.aet.configure(border_color=(
+            "#d9695f" if validate_aetitle(self.aet.get().strip())
+            else self._def_border))
+        self.calling.configure(border_color=(
+            "#d9695f" if validate_aetitle(self.calling.get().strip(),
+                                          allow_empty=True)
+            else self._def_border))
 
     def _changed(self) -> None:
+        self._validate_fields()
         if self._on_change:
             self._on_change()
 
@@ -108,7 +123,14 @@ class SettingsPanel(ToolPanel):
         self.my_ae = ctk.CTkEntry(top, width=200)
         self.my_ae.insert(0, self.app.settings.my_aetitle)
         self.my_ae.grid(row=0, column=1, padx=PAD, pady=PAD, sticky="w")
+        self._ae_def_border = self.my_ae.cget("border_color")
         self.my_ae.bind("<FocusOut>", lambda _e: self._autosave())
+        self.my_ae.bind("<KeyRelease>", lambda _e: self._validate_my_ae())
+        # Inline validation message, right under the My AE Title field.
+        self.ae_warn = ctk.CTkLabel(top, text="", text_color="#d9695f",
+                                    anchor="w", font=ctk.CTkFont(size=11))
+        self.ae_warn.grid(row=1, column=0, columnspan=4, padx=PAD,
+                          pady=(0, 2), sticky="w")
 
         ctk.CTkLabel(top, text="Appearance").grid(row=0, column=2, padx=PAD)
         self.appearance = ctk.CTkOptionMenu(
@@ -118,13 +140,22 @@ class SettingsPanel(ToolPanel):
         self.appearance.grid(row=0, column=3, padx=PAD)
 
         ctk.CTkLabel(top, text="UI scale").grid(row=0, column=4, padx=PAD)
-        # Rescaling is a heavy full re-layout in CustomTkinter, so the (auto-
-        # saved) choice is applied on a short debounce and skipped when
-        # unchanged - picking through options doesn't repaint repeatedly.
-        self.text_size = ctk.CTkOptionMenu(top, values=list(SCALE_OPTIONS),
+        # Rescaling is a heavy full re-layout in CustomTkinter. Picking a scale
+        # saves instantly and takes effect next launch; "Apply now" does the
+        # one-time repaint on demand, so the user chooses when to pay for it.
+        scalebar = ctk.CTkFrame(top, fg_color="transparent")
+        scalebar.grid(row=0, column=5, padx=PAD, sticky="w")
+        self.text_size = ctk.CTkOptionMenu(scalebar, width=80,
+                                           values=list(SCALE_OPTIONS),
                                            command=self._on_scale_pick)
         self.text_size.set(scale_name(self.app.settings.ui_scale))
-        self.text_size.grid(row=0, column=5, padx=PAD)
+        self.text_size.pack(side="left")
+        ctk.CTkButton(scalebar, text="Apply now", width=80,
+                      command=self._apply_scale_now).pack(side="left",
+                                                          padx=(6, 0))
+        ctk.CTkLabel(top, text="(saved now; applies on restart, or Apply now)",
+                     text_color=MUTED, font=ctk.CTkFont(size=11)).grid(
+            row=1, column=4, columnspan=2, padx=PAD, pady=(0, 2), sticky="w")
 
         from .. import updater
         ctk.CTkLabel(top, text=f"Version {updater.current_version()}",
@@ -205,7 +236,6 @@ class SettingsPanel(ToolPanel):
         self.saved_lbl.grid(row=4, column=0, sticky="w", padx=PAD, pady=PAD)
 
         self._applied_scale = self.app.settings.ui_scale
-        self._scale_after = None
         self._loaded = True   # enable autosave now that widgets are populated
 
     def _file_row(self, parent, row: int, label: str, value: str):
@@ -326,28 +356,20 @@ class SettingsPanel(ToolPanel):
             self.app.destinations = nodes
             config.save_destinations(nodes)
             self.app.broadcast_destinations_changed()
-            warn = self._ae_warnings(s, nodes)
-            if warn:
-                self._flash_saved("Saved, but check: " + warn, ok=False)
-            else:
-                self._flash_saved(f"Saved ({len(nodes)} destination(s))")
+            self._flash_saved(f"Saved ({len(nodes)} destination(s))")
         except Exception as exc:  # noqa: BLE001
             self._flash_saved(f"Save failed: {exc}", ok=False)
+        # AE-title feedback shows inline (at the field), not down here.
+        self._validate_my_ae()
 
-    def _ae_warnings(self, settings, nodes) -> str:
-        """First invalid-AE-title problem among My AE and the destinations, or
-        '' if all are valid. Saved anyway - this is advisory, not blocking."""
-        my = validate_aetitle(settings.my_aetitle)
-        if my:
-            return f"My AE Title '{settings.my_aetitle}' {my}"
-        for n in nodes:
-            p = validate_aetitle(n.aetitle)
-            if p:
-                return f"{n.name or n.aetitle}: AE Title {p}"
-            cp = validate_aetitle(n.calling_aetitle, allow_empty=True)
-            if cp:
-                return f"{n.name or n.aetitle}: Calling AE {cp}"
-        return ""
+    def _validate_my_ae(self) -> None:
+        """Show any My-AE-Title violation inline, right at the field."""
+        problem = validate_aetitle(self.my_ae.get().strip())
+        self.my_ae.configure(
+            border_color="#d9695f" if problem else self._ae_def_border)
+        if hasattr(self, "ae_warn"):
+            self.ae_warn.configure(
+                text=(f"Invalid AE Title: {problem}" if problem else ""))
 
     def _flash_saved(self, text: str, ok: bool = True) -> None:
         if hasattr(self, "saved_lbl"):
@@ -356,15 +378,12 @@ class SettingsPanel(ToolPanel):
                 text_color=(MUTED if ok else "#d9695f"))
 
     def _on_scale_pick(self, _name: str) -> None:
-        # Persist the choice now (cheap); apply the heavy rescale on a short
-        # debounce so flicking through options doesn't repaint each time.
+        # Just persist the choice (instant). The heavy rescale is applied only
+        # on restart or when the user clicks "Apply now".
         self._autosave()
-        if self._scale_after is not None:
-            self.after_cancel(self._scale_after)
-        self._scale_after = self.after(450, self._apply_scale_now)
+        self._flash_saved("UI scale saved - applies on restart (or Apply now)")
 
     def _apply_scale_now(self) -> None:
-        self._scale_after = None
         val = SCALE_OPTIONS.get(self.text_size.get(), DEFAULT_SCALE)
         if abs(val - self._applied_scale) > 1e-6:
             apply_scale(val)
