@@ -49,6 +49,8 @@ class PreviewPanel(ToolPanel):
             side="left")
         ctk.CTkButton(bar, text="Open series folder...",
                       command=self._open_folder).pack(side="left", padx=PAD)
+        ctk.CTkButton(bar, text="Clear", width=70, command=self._clear).pack(
+            side="right")
 
         self.info = ctk.CTkLabel(self.body, text="No image loaded.", anchor="w",
                                  text_color=MUTED, justify="left")
@@ -113,6 +115,19 @@ class PreviewPanel(ToolPanel):
         folder = filedialog.askdirectory(title="Select a series / study folder")
         if folder:
             self._load_series([Path(folder)])
+
+    def _clear(self) -> None:
+        """Reset back to the empty drop-zone state."""
+        self._views = []
+        self._cache.clear()
+        self._img_ref = None
+        self._idx = 0
+        self.slider.pack_forget()
+        self.pos_lbl.configure(text="")
+        self.info.configure(text="No image loaded.", text_color=MUTED)
+        self.image_lbl.configure(
+            image=None,
+            text="↓   Drop a DICOM file or a series folder here")
 
     def _load_series(self, roots: list[Path], single: bool = False) -> None:
         self.info.configure(text="Scanning …", text_color=MUTED)

@@ -43,6 +43,8 @@ class TagListPanel(ToolPanel):
         self.drop_hint = ctk.CTkLabel(
             bar, text="…or drag a DICOM file here", text_color=MUTED)
         self.drop_hint.pack(side="left", padx=8)
+        ctk.CTkButton(bar, text="Clear", width=70, command=self._clear).pack(
+            side="right", padx=6, pady=8)
         self.path_lbl = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.path_lbl.pack(side="left", padx=PAD)
 
@@ -61,6 +63,10 @@ class TagListPanel(ToolPanel):
         files = [Path(p) for p in dropped if Path(p).is_file()]
         if files:
             self._load(files[0])
+
+    def _clear(self) -> None:
+        self.log.clear()
+        self.path_lbl.configure(text="")
 
     def _open(self) -> None:
         p = filedialog.askopenfilename(
