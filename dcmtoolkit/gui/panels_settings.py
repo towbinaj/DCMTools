@@ -210,27 +210,29 @@ class SettingsPanel(ToolPanel):
         editor.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(3, weight=1)
 
-        header = ctk.CTkFrame(editor, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(header, text="Destinations  (Tmo = timeout secs)",
-                     font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
-        ctk.CTkButton(header, text="+ Worklist / MPPS", width=140,
-                      command=lambda: self._add_blank(DEST_GROUP_WORKLIST)
-                      ).pack(side="right", padx=2)
-        ctk.CTkButton(header, text="+ PACS / Storage", width=140,
+        # Title on its own row, buttons on a second row (they don't fit on one).
+        ctk.CTkLabel(editor, text="Destinations  (Tmo = timeout secs)",
+                     font=ctk.CTkFont(size=15, weight="bold")).grid(
+            row=0, column=0, sticky="w", padx=PAD, pady=(PAD, 2))
+        btnbar = ctk.CTkFrame(editor, fg_color="transparent")
+        btnbar.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, 4))
+        ctk.CTkButton(btnbar, text="+ PACS / Storage", width=130,
                       command=lambda: self._add_blank(DEST_GROUP_STORAGE)
-                      ).pack(side="right", padx=2)
-        ctk.CTkButton(header, text="Import file...", width=110,
-                      command=self._import_file).pack(side="right", padx=2)
-        ctk.CTkButton(header, text="Import legacy folder...", width=150,
-                      command=self._import_legacy).pack(side="right", padx=2)
-        ctk.CTkButton(header, text="Export...", width=80,
-                      command=self._export).pack(side="right", padx=2)
+                      ).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(btnbar, text="+ Worklist / MPPS", width=140,
+                      command=lambda: self._add_blank(DEST_GROUP_WORKLIST)
+                      ).pack(side="left", padx=4)
+        ctk.CTkButton(btnbar, text="Export...", width=80,
+                      command=self._export).pack(side="right", padx=(4, 0))
+        ctk.CTkButton(btnbar, text="Import legacy folder...", width=150,
+                      command=self._import_legacy).pack(side="right", padx=4)
+        ctk.CTkButton(btnbar, text="Import file...", width=110,
+                      command=self._import_file).pack(side="right", padx=4)
 
         self.rows_frame = ctk.CTkScrollableFrame(editor, height=300)
-        self.rows_frame.grid(row=1, column=0, sticky="nsew", pady=PAD)
+        self.rows_frame.grid(row=2, column=0, sticky="nsew", pady=PAD)
         self.rows_frame.grid_columnconfigure(0, weight=1)
-        editor.grid_rowconfigure(1, weight=1)
+        editor.grid_rowconfigure(2, weight=1)
 
         self._rows: list[_DestRow] = []
         self._load_rows()
