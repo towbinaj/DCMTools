@@ -15,11 +15,18 @@ import customtkinter as ctk
 MUTED = ("gray30", "gray74")
 
 # Named UI scales offered in Settings -> Text size.
+# UI scale factor shown as a plain percentage. Scales the whole interface
+# (widgets + fonts) uniformly; 115% is the default so the app is comfortably
+# readable out of the box. 100% is the system-native size.
+DEFAULT_SCALE = 1.15
+
 SCALE_OPTIONS: dict[str, float] = {
-    "Normal": 1.0,
-    "Large": 1.15,
-    "Larger": 1.3,
-    "Largest": 1.5,
+    "90%": 0.9,
+    "100%": 1.0,
+    "115%": 1.15,
+    "130%": 1.3,
+    "150%": 1.5,
+    "175%": 1.75,
 }
 
 
@@ -27,7 +34,7 @@ def scale_name(value: float) -> str:
     for name, v in SCALE_OPTIONS.items():
         if abs(v - value) < 0.001:
             return name
-    return "Large"
+    return "115%"
 
 
 def apply_scale(value: float) -> None:

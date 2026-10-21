@@ -12,7 +12,7 @@ from ..importer import (import_legacy, import_any, export_csv, export_json)
 from ..model import (Node, DEST_GROUPS, DEST_GROUP_STORAGE,
                      DEST_GROUP_WORKLIST)
 from .base import ToolPanel
-from .theme import MUTED, SCALE_OPTIONS, apply_scale, scale_name
+from .theme import MUTED, SCALE_OPTIONS, DEFAULT_SCALE, apply_scale, scale_name
 from .widgets import PAD
 
 
@@ -100,11 +100,15 @@ class SettingsPanel(ToolPanel):
         self.appearance.set(self.app.settings.appearance)
         self.appearance.grid(row=0, column=3, padx=PAD)
 
-        ctk.CTkLabel(top, text="Text size").grid(row=0, column=4, padx=PAD)
-        self.text_size = ctk.CTkOptionMenu(
-            top, values=list(SCALE_OPTIONS), command=self._change_scale)
+        ctk.CTkLabel(top, text="UI scale").grid(row=0, column=4, padx=PAD)
+        # Rescaling is a heavy full re-layout in CustomTkinter, so it is applied
+        # once on Save (not live on every pick) and skipped when unchanged.
+        self.text_size = ctk.CTkOptionMenu(top, values=list(SCALE_OPTIONS))
         self.text_size.set(scale_name(self.app.settings.ui_scale))
         self.text_size.grid(row=0, column=5, padx=PAD)
+        ctk.CTkLabel(top, text="(applies on Save)", text_color=MUTED,
+                     font=ctk.CTkFont(size=11)).grid(
+            row=1, column=4, columnspan=2, padx=PAD, pady=(0, PAD), sticky="w")
 
         from .. import updater
         ctk.CTkLabel(top, text=f"Version {updater.current_version()}",
@@ -268,9 +272,6 @@ class SettingsPanel(ToolPanel):
     def _change_appearance(self, mode: str) -> None:
         ctk.set_appearance_mode(mode)
 
-    def _change_scale(self, name: str) -> None:
-        # Apply live so the user can see the effect immediately.
-        apply_scale(SCALE_OPTIONS.get(name, 1.15))
 
     def _import_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -356,8 +357,9 @@ class SettingsPanel(ToolPanel):
     def _save(self) -> None:
         self.app.settings.my_aetitle = self.my_ae.get().strip() or "DICOMTOOLKIT"
         self.app.settings.appearance = self.appearance.get()
-        self.app.settings.ui_scale = SCALE_OPTIONS.get(self.text_size.get(),
-                                                       1.15)
+        new_scale = SCALE_OPTIONS.get(self.text_size.get(), DEFAULT_SCALE)
+        scale_changed = abs(new_scale - self.app.settings.ui_scale) > 1e-6
+        self.app.settings.ui_scale = new_scale
         self.app.settings.tls_verify = bool(self.tls_verify.get())
         self.app.settings.tls_ca_file = self.tls_ca.get().strip()
         self.app.settings.tls_cert_file = self.tls_cert.get().strip()
@@ -371,3 +373,7 @@ class SettingsPanel(ToolPanel):
         self.app.broadcast_destinations_changed()
         messagebox.showinfo("Saved",
                             f"Saved settings and {len(nodes)} destination(s).")
+        # Apply the (heavy) rescale last, only when it actually changed, so a
+        # normal Save doesn't pay for a full re-layout.
+        if scale_changed:
+            apply_scale(new_scale)
