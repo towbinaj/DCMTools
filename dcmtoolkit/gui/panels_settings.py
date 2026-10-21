@@ -129,7 +129,7 @@ class SettingsPanel(ToolPanel):
         # Inline validation message, right under the My AE Title field.
         self.ae_warn = ctk.CTkLabel(top, text="", text_color="#d9695f",
                                     anchor="w", font=ctk.CTkFont(size=11))
-        self.ae_warn.grid(row=1, column=0, columnspan=4, padx=PAD,
+        self.ae_warn.grid(row=1, column=0, columnspan=2, padx=PAD,
                           pady=(0, 2), sticky="w")
 
         ctk.CTkLabel(top, text="Appearance").grid(row=0, column=2, padx=PAD)
@@ -159,24 +159,24 @@ class SettingsPanel(ToolPanel):
 
         from .. import updater
         ctk.CTkLabel(top, text=f"Version {updater.current_version()}",
-                     text_color=MUTED).grid(row=1, column=0, padx=PAD,
+                     text_color=MUTED).grid(row=2, column=0, padx=PAD,
                                             pady=(0, PAD), sticky="w")
         ctk.CTkButton(top, text="Check for updates", width=140,
                       command=self._check_updates).grid(
-            row=1, column=1, padx=PAD, pady=(0, PAD), sticky="w")
+            row=2, column=1, padx=PAD, pady=(0, PAD), sticky="w")
 
         ctk.CTkLabel(top, text="Bug report email").grid(
-            row=1, column=2, padx=PAD, pady=(0, PAD), sticky="e")
+            row=2, column=2, padx=PAD, pady=(0, PAD), sticky="e")
         self.bug_email = ctk.CTkEntry(
             top, width=200, placeholder_text="where 'Report a Bug' sends")
         self.bug_email.insert(0, self.app.settings.bug_report_email)
-        self.bug_email.grid(row=1, column=3, columnspan=2, padx=PAD,
+        self.bug_email.grid(row=2, column=3, columnspan=2, padx=PAD,
                             pady=(0, PAD), sticky="w")
         self.bug_email.bind("<FocusOut>", lambda _e: self._autosave())
         ctk.CTkButton(top, text="Report a Bug", width=110,
                       fg_color="#b5651d", hover_color="#c8761f",
                       command=self.app._report_bug).grid(
-            row=1, column=5, padx=PAD, pady=(0, PAD), sticky="w")
+            row=2, column=5, padx=PAD, pady=(0, PAD), sticky="w")
 
         # Outgoing TLS (used by destinations flagged 'TLS')
         tlsf = ctk.CTkFrame(self.body)
