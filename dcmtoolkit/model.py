@@ -8,6 +8,28 @@ from dataclasses import dataclass, asdict
 
 AE_TITLE_MAX = 16
 
+
+def validate_aetitle(ae: str, *, allow_empty: bool = False) -> str:
+    """Check a DICOM AE Title (PS3.5 ``AE`` value representation).
+
+    Returns '' when valid, else a short human-readable reason. Rules: 1-16
+    characters, not empty / not all spaces, printable ASCII only (0x20-0x7E, no
+    control or non-ASCII characters), and no backslash (the DICOM multi-value
+    delimiter).
+    """
+    if ae is None or ae == "":
+        return "" if allow_empty else "cannot be empty"
+    if ae.strip() == "":
+        return "cannot be all spaces"
+    if len(ae) > AE_TITLE_MAX:
+        return f"too long ({len(ae)} chars; max {AE_TITLE_MAX})"
+    if "\\" in ae:
+        return "backslash (\\) is not allowed"
+    bad = [c for c in ae if ord(c) < 0x20 or ord(c) > 0x7E]
+    if bad:
+        return "only printable ASCII is allowed (no control/non-ASCII chars)"
+    return ""
+
 # Destination groups. Storage targets (PACS/VNA/workstations) are the default;
 # worklist/MPPS servers (RIS) are a separate kind so they don't show up in the
 # storage-oriented pickers (Send, Query, Retrieve, ...).
@@ -65,16 +87,13 @@ class Node:
         problems: list[str] = []
         if not self.name:
             problems.append("Name is empty.")
-        if not self.aetitle:
-            problems.append("AE Title is empty.")
-        elif len(self.aetitle) > AE_TITLE_MAX:
-            problems.append(
-                f"AE Title '{self.aetitle}' exceeds {AE_TITLE_MAX} characters."
-            )
-        if self.calling_aetitle and len(self.calling_aetitle) > AE_TITLE_MAX:
-            problems.append(
-                f"Calling AE '{self.calling_aetitle}' exceeds "
-                f"{AE_TITLE_MAX} characters.")
+        ae_problem = validate_aetitle(self.aetitle)
+        if ae_problem:
+            problems.append(f"AE Title '{self.aetitle}': {ae_problem}.")
+        calling_problem = validate_aetitle(self.calling_aetitle, allow_empty=True)
+        if calling_problem:
+            problems.append(f"Calling AE '{self.calling_aetitle}': "
+                            f"{calling_problem}.")
         if not self.host:
             problems.append("Host is empty.")
         else:

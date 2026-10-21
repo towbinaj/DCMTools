@@ -10,7 +10,7 @@ import customtkinter as ctk
 from .. import config
 from ..importer import (import_legacy, import_any, export_csv, export_json)
 from ..model import (Node, DEST_GROUPS, DEST_GROUP_STORAGE,
-                     DEST_GROUP_WORKLIST)
+                     DEST_GROUP_WORKLIST, validate_aetitle)
 from .base import ToolPanel
 from .theme import MUTED, SCALE_OPTIONS, DEFAULT_SCALE, apply_scale, scale_name
 from .widgets import PAD
@@ -326,9 +326,28 @@ class SettingsPanel(ToolPanel):
             self.app.destinations = nodes
             config.save_destinations(nodes)
             self.app.broadcast_destinations_changed()
-            self._flash_saved(f"Saved ({len(nodes)} destination(s))")
+            warn = self._ae_warnings(s, nodes)
+            if warn:
+                self._flash_saved("Saved, but check: " + warn, ok=False)
+            else:
+                self._flash_saved(f"Saved ({len(nodes)} destination(s))")
         except Exception as exc:  # noqa: BLE001
             self._flash_saved(f"Save failed: {exc}", ok=False)
+
+    def _ae_warnings(self, settings, nodes) -> str:
+        """First invalid-AE-title problem among My AE and the destinations, or
+        '' if all are valid. Saved anyway - this is advisory, not blocking."""
+        my = validate_aetitle(settings.my_aetitle)
+        if my:
+            return f"My AE Title '{settings.my_aetitle}' {my}"
+        for n in nodes:
+            p = validate_aetitle(n.aetitle)
+            if p:
+                return f"{n.name or n.aetitle}: AE Title {p}"
+            cp = validate_aetitle(n.calling_aetitle, allow_empty=True)
+            if cp:
+                return f"{n.name or n.aetitle}: Calling AE {cp}"
+        return ""
 
     def _flash_saved(self, text: str, ok: bool = True) -> None:
         if hasattr(self, "saved_lbl"):

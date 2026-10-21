@@ -3,8 +3,20 @@
 from __future__ import annotations
 
 from dcmtoolkit.model import (Node, DEST_GROUP_STORAGE, DEST_GROUP_WORKLIST,
-                              AE_TITLE_MAX)
+                              AE_TITLE_MAX, validate_aetitle)
 from dcmtoolkit import importer
+
+
+def test_validate_aetitle():
+    assert validate_aetitle("PACS1") == ""
+    assert validate_aetitle("A" * 16) == ""
+    assert "empty" in validate_aetitle("")
+    assert validate_aetitle("", allow_empty=True) == ""
+    assert "spaces" in validate_aetitle("   ")
+    assert "too long" in validate_aetitle("A" * 17)
+    assert "backslash" in validate_aetitle(r"AE\X")
+    assert "ASCII" in validate_aetitle("café")       # non-ASCII
+    assert "ASCII" in validate_aetitle("AE\tX")       # control char
 
 
 def test_node_defaults_and_roundtrip():
