@@ -46,16 +46,39 @@ def default_subject() -> str:
     return f"DICOM Toolkit bug report (v{__version__})"
 
 
-# --- PHI scrubbing ---------------------------------------------------------
-# Heuristics to keep patient identifiers out of a diagnostics bundle. Not a
-# guarantee - the bundle is also shown to the user to review before sending.
+# --- scrubbing -------------------------------------------------------------
+# Heuristics to keep identifiers out of a diagnostics bundle: patient names and
+# IDs, but also site/infrastructure details (IP addresses, AE@host:port nodes,
+# and the logged-in user name in file paths) so a report that leaves the
+# machine - or is pasted into an issue - does not carry secrets. Not a
+# guarantee; the bundle is also shown to the user to review before sending.
+import getpass  # noqa: E402
+
 _PN_RE = re.compile(r"[A-Za-z][\w'-]*\^[\w'^ -]+")          # DICOM PN (Last^First)
 _NUM_RE = re.compile(r"(?<![\w.])\d{5,}(?![\w.])")          # long id/accession runs
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")        # IPv4 (optionally :port)
+_NODE_RE = re.compile(r"\b[\w-]{1,32}@[\w.\-]+(?::\d+)?")   # AE@host[:port]
+# \Users\<name>, /home/<name>, /Users/<name> -> redact the user component only.
+_USERPATH_RE = re.compile(
+    r"([\\/](?:Users|home)[\\/])([^\\/\r\n]+)", re.IGNORECASE)
+_UNC_RE = re.compile(r"\\\\[^\\\r\n]+")                     # \\host\share -> host
 
 
 def scrub(text: str) -> str:
-    """Redact likely PHI (PN-style names, long numeric IDs) from log text."""
+    """Redact likely PHI and site/infrastructure identifiers from log text."""
+    text = _NODE_RE.sub("[NODE]", text)        # before IP, so host in AE@host goes too
+    text = _IP_RE.sub("[IP]", text)
     text = _PN_RE.sub("[NAME]", text)
+    text = _USERPATH_RE.sub(r"\1[USER]", text)
+    text = _UNC_RE.sub(r"\\\\[HOST]", text)
+    # Redact the current OS user name wherever it appears verbatim.
+    try:
+        user = getpass.getuser()
+    except Exception:  # noqa: BLE001
+        user = ""
+    if user and len(user) >= 3:
+        text = re.sub(rf"(?<![\w]){re.escape(user)}(?![\w])", "[USER]", text,
+                      flags=re.IGNORECASE)
     text = _NUM_RE.sub("[NUM]", text)
     return text
 
@@ -82,7 +105,7 @@ def environment_info(settings=None) -> str:
             n = "?"
         lines.append(f"Remembered destinations: {n}")
     lines.append(f"Data dir: {paths.data_dir()}")
-    return "\n".join(lines)
+    return scrub("\n".join(lines))
 
 
 def _log_tail(max_lines: int = 400) -> str:
@@ -145,7 +168,8 @@ def inline_body(description: str, settings=None, *, log_lines: int = 60) -> str:
     client."""
     return (
         f"{description.strip() or '(no description given)'}\n\n"
-        f"{'-' * 40}\nDIAGNOSTICS (auto-added; no images, PHI-scrubbed)\n"
+        f"{'-' * 40}\nDIAGNOSTICS (auto-added; no images; scrubbed of names, "
+        f"IDs, IP addresses, hosts & user paths)\n"
         f"{'-' * 40}\n{environment_info(settings)}\n\n"
         f"Recent activity log (last {log_lines} lines):\n"
         f"{_log_tail(log_lines)}\n"

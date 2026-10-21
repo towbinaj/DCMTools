@@ -27,9 +27,10 @@ class BugReportDialog(ctk.CTkToplevel):
             anchor="w", padx=PAD, pady=(PAD, 2))
 
         to = support.resolve_bug_email(self.app.settings)
-        intro = ("Describe the problem (and how to reproduce it). "
-                 "App version, OS and a PHI-scrubbed activity-log tail are "
-                 "added automatically - no images, nothing to attach.")
+        intro = ("Describe the problem (and how to reproduce it). App version, "
+                 "OS and a recent activity-log tail are added automatically - "
+                 "scrubbed of names, IDs, IP addresses, hosts and user paths; "
+                 "no images, nothing to attach.")
         ctk.CTkLabel(self, justify="left", wraplength=520, text=intro).pack(
             anchor="w", padx=PAD)
 

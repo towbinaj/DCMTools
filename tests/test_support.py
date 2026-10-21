@@ -17,6 +17,21 @@ def test_scrub_removes_names_and_long_numbers():
     assert support.scrub("3 of 12 files") == "3 of 12 files"
 
 
+def test_scrub_removes_site_infrastructure():
+    # IP, AE@host:port node, and user-home path components must be redacted.
+    # Uses RFC 5737 documentation addresses + a fake AE, never real values.
+    assert "192.0.2.27" not in support.scrub("conn 192.0.2.27 ok")
+    node = support.scrub("Associating with TESTPACS@192.0.2.27:104 ...")
+    assert "TESTPACS" not in node and "192.0.2.27" not in node
+    assert "[NODE]" in node
+    win = support.scrub(r"saved to C:\Users\jsmith\Downloads\x.csv")
+    assert "jsmith" not in win and "[USER]" in win
+    nix = support.scrub("saved to /home/jsmith/x.csv")
+    assert "jsmith" not in nix
+    unc = support.scrub(r"path \\fileserver\share")
+    assert "fileserver" not in unc and "[HOST]" in unc
+
+
 def test_resolve_bug_email_priority(monkeypatch):
     s = config.Settings(bug_report_email="settings@example.org")
     assert support.resolve_bug_email(s) == "settings@example.org"
