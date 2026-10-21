@@ -18,7 +18,8 @@ class BugReportDialog(ctk.CTkToplevel):
         super().__init__(app)
         self.app = app
         self.title("Report a Bug")
-        self.geometry("560x420")
+        self.geometry("560x440")
+        self.minsize(460, 340)
         self.transient(app)
         self.grab_set()
 
@@ -34,23 +35,25 @@ class BugReportDialog(ctk.CTkToplevel):
         ctk.CTkLabel(self, justify="left", wraplength=520, text=intro).pack(
             anchor="w", padx=PAD)
 
-        self.desc = ctk.CTkTextbox(self, height=210, wrap="word")
-        self.desc.pack(fill="both", expand=True, padx=PAD, pady=PAD)
-        self.desc.focus_set()
+        # Pin the buttons (and note) to the bottom BEFORE the expanding text box,
+        # so they stay visible even when the window is short / content is long.
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=PAD, pady=PAD)
+        ctk.CTkButton(btns, text="Open email", command=self._submit).pack(
+            side="left")
+        ctk.CTkButton(btns, text="Cancel", fg_color="gray40",
+                      command=self.destroy).pack(side="left", padx=PAD)
 
         note = (f"Opens an email to {to}" if to else
                 "No recipient set - add one in Settings > Bug report email. "
                 "Your email will still open so you can choose a recipient.")
         ctk.CTkLabel(self, text=note, text_color=("gray40", "gray65"),
                      anchor="w", wraplength=520, justify="left").pack(
-            anchor="w", padx=PAD)
+            side="bottom", anchor="w", padx=PAD, pady=(0, 2))
 
-        btns = ctk.CTkFrame(self, fg_color="transparent")
-        btns.pack(fill="x", padx=PAD, pady=PAD)
-        ctk.CTkButton(btns, text="Open email", command=self._submit).pack(
-            side="left")
-        ctk.CTkButton(btns, text="Cancel", fg_color="gray40",
-                      command=self.destroy).pack(side="left", padx=PAD)
+        self.desc = ctk.CTkTextbox(self, wrap="word")
+        self.desc.pack(fill="both", expand=True, padx=PAD, pady=PAD)
+        self.desc.focus_set()
 
     def _submit(self) -> None:
         desc = self.desc.get("1.0", "end").strip()
