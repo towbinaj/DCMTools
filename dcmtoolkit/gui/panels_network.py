@@ -621,6 +621,7 @@ class RetrievePanel(ToolPanel):
         self.fields: dict[str, ctk.CTkEntry] = {}
         for i, (key, label) in enumerate([
             ("PatientID", "Patient ID"),
+            ("PatientName", "Patient Name"),
             ("AccessionNumber", "Accession"),
             ("StudyDate", "Study Date (YYYYMMDD)"),
         ]):
@@ -682,8 +683,13 @@ class RetrievePanel(ToolPanel):
         self.retrieve_btn.configure(state="disabled")
         my_ae = self.app.settings.my_aetitle
         criteria = {k: e.get().strip() for k, e in self.fields.items()}
+        # Make a plain surname forgiving (smith -> smith*), same as Query/Move.
+        criteria["PatientName"] = _name_for_query(criteria.get("PatientName", ""))
+        if criteria["PatientName"]:
+            self.log.write(f"Patient Name query: {criteria['PatientName']}")
+        # PatientName now comes through **criteria (empty -> universal return key).
         ident = scu.build_query("STUDY", StudyInstanceUID="",
-                                StudyDescription="", PatientName="",
+                                StudyDescription="",
                                 ModalitiesInStudy="",
                                 NumberOfStudyRelatedInstances="",
                                 **criteria)
