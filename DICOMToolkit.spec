@@ -65,7 +65,12 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["pytest", "tkinter.test", "test"],
+    # Trim dead weight to shrink the onefile bundle (faster extract on launch
+    # and cleanup on exit): we never handle AVIF/HEIF images - all pixel
+    # decoding is pylibjpeg (JPEG/JPEG2000/JPEG-LS) + pydicom RLE - so Pillow's
+    # ~8 MB AVIF plugin is pure bloat.
+    excludes=["pytest", "tkinter.test", "test",
+              "PIL._avif", "PIL.AvifImagePlugin"],
     noarchive=False,
 )
 
