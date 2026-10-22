@@ -777,16 +777,47 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.img_top_mod = row("  ...top modalities", entry())
         self.img_left = row("Remove Image Left %", entry(80))
         self.img_left_mod = row("  ...left modalities", entry())
-        self.morph_tags = ctk.CTkCheckBox(form, text="Enable morphing")
+        # Morphing: map tag values per-object from a crosswalk file.
+        self._morph_targets = []        # [(hex, keyword)]
+        common = [""] + dicomtags.common_tag_labels()
+        self.morph_tags = ctk.CTkCheckBox(
+            form, text="Enable morphing (set tag values per file from a "
+            "crosswalk)")
         row("", self.morph_tags)
-        self.morph_fmt = row("Morph Format (tags|..)", entry())
+
+        # Key tag (the value looked up in the crosswalk).
+        self.morph_key = ctk.CTkComboBox(form, values=common, width=260)
+        self.morph_key.set("Accession Number (00080050)")
+        row("Key tag (lookup)", self.morph_key)
+
+        # Overwrite tags (set from the matching crosswalk row, in order).
+        tbar = ctk.CTkFrame(form, fg_color="transparent")
+        self.morph_target_combo = ctk.CTkComboBox(tbar, values=common, width=220)
+        self.morph_target_combo.pack(side="left")
+        ctk.CTkButton(tbar, text="+ Add", width=60,
+                      command=self._morph_add_target).pack(side="left", padx=4)
+        ctk.CTkButton(tbar, text="Clear", width=60, fg_color="gray40",
+                      command=self._morph_clear_targets).pack(side="left")
+        row("Overwrite tags", tbar)
+        self.morph_targets_lbl = ctk.CTkLabel(form, text="(none)",
+                                              text_color=MUTED, anchor="w")
+        row("  → will set", self.morph_targets_lbl)
+
+        # Crosswalk file + header option.
         morphbar = ctk.CTkFrame(form, fg_color="transparent")
-        self.morph_file = ctk.CTkEntry(morphbar, width=360)
+        self.morph_file = ctk.CTkEntry(morphbar, width=320)
         self.morph_file.pack(side="left")
         ctk.CTkButton(morphbar, text="...", width=32,
-                      command=lambda: self._browse_into(self.morph_file)).pack(
-            side="left", padx=4)
-        row("Morph File", morphbar)
+                      command=self._browse_morph_file).pack(side="left", padx=4)
+        self.morph_header = ctk.CTkCheckBox(morphbar, text="has header row")
+        self.morph_header.select()
+        self.morph_header.pack(side="left", padx=PAD)
+        row("Crosswalk file (CSV)", morphbar)
+        self.morph_hint = ctk.CTkLabel(
+            form, text="CSV columns, in order: <key value>, then one column per "
+            "overwrite tag above.", text_color=MUTED, anchor="w",
+            font=ctk.CTkFont(size=11))
+        row("", self.morph_hint)
 
         # Pipeline: optionally C-STORE the de-identified output to a PACS/VNA.
         sendbar = ctk.CTkFrame(self.body, fg_color="transparent")
@@ -949,9 +980,50 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             remove_image_left=to_int(self.img_left.get(), 0),
             remove_image_left_modality=_split(self.img_left_mod.get()),
             morph_tags=bool(self.morph_tags.get()),
-            morphing_file_format=self.morph_fmt.get().strip(),
+            morphing_file_format=self._morph_format(),
             morphing_file=self.morph_file.get().strip(),
+            morph_has_header=bool(self.morph_header.get()),
         )
+
+    # -- morphing helpers ------------------------------------------------
+    def _resolve_hex(self, text: str):
+        """(hex, keyword) for a tag picker value, or (None, '')."""
+        try:
+            tag, kw = dicomtags.resolve_tag(text)
+            if tag is None:
+                return None, ""
+            return dicomtags.to_hex(tag), (kw or dicomtags.to_hex(tag))
+        except Exception:  # noqa: BLE001
+            return None, ""
+
+    def _morph_add_target(self) -> None:
+        hexv, kw = self._resolve_hex(self.morph_target_combo.get())
+        if hexv and hexv not in [h for h, _ in self._morph_targets]:
+            self._morph_targets.append((hexv, kw))
+            self._refresh_morph_targets()
+
+    def _morph_clear_targets(self) -> None:
+        self._morph_targets = []
+        self._refresh_morph_targets()
+
+    def _refresh_morph_targets(self) -> None:
+        self.morph_targets_lbl.configure(
+            text=", ".join(kw for _, kw in self._morph_targets) or "(none)")
+
+    def _morph_format(self) -> str:
+        """Build 'key|target1|target2' from the pickers (empty if incomplete)."""
+        key, _ = self._resolve_hex(self.morph_key.get())
+        targets = [h for h, _ in self._morph_targets]
+        if not key or not targets:
+            return ""
+        return "|".join([key] + targets)
+
+    def _browse_morph_file(self) -> None:
+        f = filedialog.askopenfilename(
+            filetypes=[("Crosswalk", "*.csv *.txt"), ("All files", "*.*")])
+        if f:
+            self.morph_file.delete(0, "end")
+            self.morph_file.insert(0, f)
 
     def _run(self):
         if not self.files:

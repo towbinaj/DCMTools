@@ -87,30 +87,35 @@ opposite — keep the real dates.)
 ## 5. Morphing (per-file values from a crosswalk)
 
 **Replace** sets *one fixed value for every file*. **Morphing** is different: it
-sets **different values per object**, looked up from a table — e.g. assign each
-accession its own pseudonymous name/ID.
+sets **different values per object**, looked up from a crosswalk — e.g. assign
+each accession its own pseudonymous name/ID.
 
-- **Morph Format** = pipe-separated tags. The **first** tag is the **lookup
-  key**; the rest are the tags to overwrite.
-- **Morph File** = pipe-delimited rows; the first column is the key value, the
-  rest line up with the format's remaining tags.
+Tick **Enable morphing**, then:
 
-**Example — map each accession to a pseudonym (two tags at once):**
+1. **Key tag (lookup)** — pick the tag whose value identifies each record
+   (e.g. *Accession Number*).
+2. **Overwrite tags** — pick a tag and **+ Add** it; repeat for as many tags as
+   you want to set. The "→ will set" line lists them. **Yes, you can morph many
+   tags at once.**
+3. **Crosswalk file (CSV)** — a CSV whose columns, in order, are: the **key
+   value**, then one column per overwrite tag (same order as above). Leave
+   **has header row** ticked if the first row is a header.
+
+**Example:** Key tag = *Accession Number*, Overwrite tags = *Patient Name*,
+*Patient ID*, with this CSV:
 
 ```
-Morph Format:  00080050|00100010|00100020        (Accession | PatientName | PatientID)
-Morph File:
-  ACC123|CASE-001|ID-001
-  ACC124|CASE-002|ID-002
+accession,name,id
+ACC123,CASE-001,ID-001
+ACC124,CASE-002,ID-002
 ```
 
-For an object whose `AccessionNumber` is `ACC123`, morphing sets
-`PatientName=CASE-001` and `PatientID=ID-001`. **Yes, it morphs as many tags as
-you list** — add more tags to the format and more columns to each row. An object
-whose key isn't in the file is left unchanged by morphing.
+An object whose `AccessionNumber` is `ACC123` gets `PatientName=CASE-001` and
+`PatientID=ID-001`. A key not in the file is left unchanged by morphing.
 
-> Morphing is applied *before* the Basic Profile would blank those tags, so the
-> morphed values are what remains. New tags it creates use VR `LO`.
+> Morphing runs *before* the Basic Profile would blank those tags, so the
+> morphed values are what remains. New tags it creates use VR `LO`. (A legacy
+> pipe-delimited `|` file is still accepted.)
 
 **Can morphing be part of a saved profile?** Not yet — profiles hold fixed
 per-tag rules, while morphing needs an external crosswalk file, so it stays a

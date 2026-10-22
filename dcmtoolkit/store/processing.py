@@ -63,10 +63,12 @@ class ReceiverConfig:
     remove_image_top_modality: list[str] = field(default_factory=list)
     remove_image_left: int = 0
     remove_image_left_modality: list[str] = field(default_factory=list)
-    # [MORPH]
+    # [MORPH] crosswalk: first format tag is the lookup key, the rest are
+    # overwritten from the matching crosswalk row (CSV or pipe-delimited).
     morph_tags: bool = False
     morphing_file_format: str = ""   # "00080050|00100010|00100020"
     morphing_file: str = ""
+    morph_has_header: bool = True    # skip the crosswalk's first (header) row
 
 
 def _parse_tag(s: str) -> Tag:
@@ -156,18 +158,29 @@ class Processor:
         return tags
 
     def _load_morph_table(self) -> dict[str, list[str]]:
+        """Crosswalk: key value (col 0) -> row of values. Accepts a CSV or a
+        pipe-delimited file; skips a header row when configured."""
         table: dict[str, list[str]] = {}
-        if self.cfg.morph_tags and self.cfg.morphing_file:
-            p = Path(self.cfg.morphing_file)
-            if p.exists():
-                for line in p.read_text(encoding="utf-8").splitlines():
-                    line = line.rstrip("\n")
-                    if not line or line.startswith("#"):
-                        continue
-                    vals = line.split("|")
-                    key = vals[0].strip()
-                    if key and key not in table:
-                        table[key] = vals
+        if not (self.cfg.morph_tags and self.cfg.morphing_file):
+            return table
+        p = Path(self.cfg.morphing_file)
+        if not p.exists():
+            return table
+        import csv as _csv
+        import io
+        text = p.read_text(encoding="utf-8")
+        # Delimiter: comma for a .csv (or comma-only content), else pipe.
+        delim = "," if (p.suffix.lower() == ".csv"
+                        or ("," in text and "|" not in text)) else "|"
+        rows = list(_csv.reader(io.StringIO(text), delimiter=delim))
+        if self.cfg.morph_has_header and rows:
+            rows = rows[1:]
+        for vals in rows:
+            if not vals or not vals[0].strip() or vals[0].lstrip().startswith("#"):
+                continue
+            key = vals[0].strip()
+            if key not in table:
+                table[key] = [v.strip() for v in vals]
         return table
 
     # -- per-object processing ------------------------------------------

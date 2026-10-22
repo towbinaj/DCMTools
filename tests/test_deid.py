@@ -58,3 +58,21 @@ def test_retain_dates_keeps_study_date_but_not_birthdate():
     assert str(ds.StudyDate) == "20200101"            # retained
     # birth date is de-identified (replaced with a dummy), not the real value
     assert str(getattr(ds, "PatientBirthDate", "")) != "19800101"
+
+
+def test_morph_from_csv_crosswalk(tmp_path):
+    cw = tmp_path / "map.csv"
+    cw.write_text("accession,name,id\nACC1,CASE-001,ID-001\n", encoding="utf-8")
+    cfg = ReceiverConfig(
+        morph_tags=True,
+        morphing_file_format="00080050|00100010|00100020",
+        morphing_file=str(cw), morph_has_header=True)
+    ds = make_ct()
+    ds.AccessionNumber = "ACC1"
+    out = Processor(cfg).process(ds)
+    assert str(out.PatientName) == "CASE-001"
+    assert str(out.PatientID) == "ID-001"
+    # a key not in the crosswalk is left unchanged
+    ds2 = make_ct(PatientName="ORIG^NAME")
+    ds2.AccessionNumber = "MISSING"
+    assert str(Processor(cfg).process(ds2).PatientName) == "ORIG^NAME"
