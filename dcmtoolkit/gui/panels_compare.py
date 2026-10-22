@@ -27,7 +27,7 @@ _STATUS = {"different": "DIFF", "only_a": "A only", "only_b": "B only",
 
 
 class ComparePanel(ToolPanel):
-    title = "Compare"
+    title = "Tag Compare"
     description = ("Compare the DICOM tags of two images, two series, or two "
                   "studies and see what differs.")
 
@@ -94,6 +94,12 @@ class ComparePanel(ToolPanel):
             cb.select()
             cb.pack(side="left", padx=4)
             self.class_vars[cls] = cb
+        ctk.CTkButton(classbar, text="All", width=46,
+                      command=lambda: self._set_all_classes(True)).pack(
+            side="left", padx=(PAD, 2))
+        ctk.CTkButton(classbar, text="None", width=52,
+                      command=lambda: self._set_all_classes(False)).pack(
+            side="left", padx=2)
 
         self.out = ctk.CTkTextbox(self.body, wrap="none",
                                   font=ctk.CTkFont(family="Consolas", size=12))
@@ -104,6 +110,11 @@ class ComparePanel(ToolPanel):
         self.summary.grid(row=4, column=0, sticky="w", padx=PAD, pady=(0, PAD))
 
         self._mode_changed()
+
+    def _set_all_classes(self, on: bool) -> None:
+        for v in self.class_vars.values():
+            v.select() if on else v.deselect()
+        self._render()
 
     # -- mode / loading --------------------------------------------------
     def _mode(self) -> str:

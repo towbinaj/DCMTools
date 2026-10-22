@@ -91,6 +91,12 @@ class TagListPanel(ToolPanel):
             var.select()
             var.pack(side="left", padx=4)
             self.class_vars[cls] = var
+        ctk.CTkButton(classbar, text="All", width=46,
+                      command=lambda: self._set_all_classes(True)).pack(
+            side="left", padx=(PAD, 2))
+        ctk.CTkButton(classbar, text="None", width=52,
+                      command=lambda: self._set_all_classes(False)).pack(
+            side="left", padx=2)
 
         # Validity: VR/value check always; optional IOD conformance overlay.
         valbar = ctk.CTkFrame(self.body, fg_color="transparent")
@@ -107,6 +113,11 @@ class TagListPanel(ToolPanel):
             "⚠ not in IOD (strict)   · n/a",
             text_color=MUTED, font=ctk.CTkFont(size=11)).pack(side="left",
                                                              padx=PAD)
+
+    def _set_all_classes(self, on: bool) -> None:
+        for v in self.class_vars.values():
+            v.select() if on else v.deselect()
+        self._render()
 
     def _on_drop(self, dropped: list) -> None:
         files = [Path(p) for p in dropped if Path(p).is_file()]

@@ -41,7 +41,7 @@ except Exception:  # noqa: BLE001
 NAV_GROUPS = [
     ("Network", [EchoPanel, EchoAllPanel, SendPanel, QueryMovePanel,
                  RetrievePanel, StorageCommitPanel]),
-    ("Files", [TagListPanel, PreviewPanel, ComparePanel, ModifyPanel,
+    ("Files", [TagListPanel, ComparePanel, PreviewPanel, ModifyPanel,
                SplitPanel, EnhancedPanel, DumpPanel, DeidentifyPanel, QAPanel]),
     ("Edit demographics", [PatientEditPanel, StudyEditPanel, SeriesEditPanel]),
     ("Modality", [ModalitySCUPanel]),
