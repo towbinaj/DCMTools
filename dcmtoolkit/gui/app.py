@@ -23,6 +23,7 @@ from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
 from .panels_preview import PreviewPanel
 from .panels_edit import PatientEditPanel, StudyEditPanel, SeriesEditPanel
 from .panels_modality import ModalitySCUPanel
+from .panels_hl7 import HL7SenderPanel
 from .panels_qa import QAPanel
 from .panels_settings import SettingsPanel
 from .panels_logs import LogPanel
@@ -43,6 +44,7 @@ NAV_GROUPS = [
                EnhancedPanel, DumpPanel, DeidentifyPanel, QAPanel]),
     ("Edit demographics", [PatientEditPanel, StudyEditPanel, SeriesEditPanel]),
     ("Modality", [ModalitySCUPanel]),
+    ("HL7", [HL7SenderPanel]),
 ]
 
 

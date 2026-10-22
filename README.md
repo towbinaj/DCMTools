@@ -22,7 +22,8 @@ initiate to destinations *you* configure.
 | `JDICOM\ModalitySCU` | **Modality SCU** tab (Worklist + MPPS + exam) |
 | `custom_code_*.cs` | Anonymize / morph / pixel-blank, all built in |
 
-> `SmartHL7.Sender` is HL7, not DICOM, and is **not** part of this app.
+> `SmartHL7.Sender` is HL7, not DICOM. A minimal **HL7 Sender** tab (send-only,
+> MLLP) now covers its common use — see below.
 
 ## Beyond the legacy tools
 
@@ -37,6 +38,7 @@ initiate to destinations *you* configure.
 | **QA / Consistency** | Scan a folder for problems (see below). |
 | **De-identify Files** | DICOM PS3.15 Basic Profile + the receiver's anonymize/morph/pixel-blank engine. |
 | **Modality SCU** | Query the Modality Worklist, then perform an exam: MPPS In Progress → stamp & send images → MPPS Completed. |
+| **HL7 Sender** | Send HL7 v2 (ADT / ORU / ORM) over MLLP and read the ACK. Paste one message or batch a folder of `.hl7` files; per-type templates; optional MSH timestamp + control-ID refresh on send. (Send-only; mimics SmartHL7.Sender.) |
 
 Most tools accept **folders and `.zip` archives** (dropped or via the buttons) —
 zips are auto-extracted to a temp folder and queued, no manual unzip. Large
