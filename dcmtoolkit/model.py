@@ -35,7 +35,8 @@ def validate_aetitle(ae: str, *, allow_empty: bool = False) -> str:
 # storage-oriented pickers (Send, Query, Retrieve, ...).
 DEST_GROUP_STORAGE = "PACS / Storage"
 DEST_GROUP_WORKLIST = "Worklist / MPPS"
-DEST_GROUPS = [DEST_GROUP_STORAGE, DEST_GROUP_WORKLIST]
+DEST_GROUP_HL7 = "HL7 / MLLP"          # HL7 v2 over MLLP (no AE title)
+DEST_GROUPS = [DEST_GROUP_STORAGE, DEST_GROUP_WORKLIST, DEST_GROUP_HL7]
 
 
 @dataclass
@@ -87,7 +88,9 @@ class Node:
         problems: list[str] = []
         if not self.name:
             problems.append("Name is empty.")
-        ae_problem = validate_aetitle(self.aetitle)
+        # HL7/MLLP endpoints have no AE title; DICOM destinations require one.
+        hl7 = self.group == DEST_GROUP_HL7
+        ae_problem = validate_aetitle(self.aetitle, allow_empty=hl7)
         if ae_problem:
             problems.append(f"AE Title '{self.aetitle}': {ae_problem}.")
         calling_problem = validate_aetitle(self.calling_aetitle, allow_empty=True)

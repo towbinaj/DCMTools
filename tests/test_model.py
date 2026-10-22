@@ -45,6 +45,17 @@ def test_node_validation():
     assert any("Port" in p for p in problems)
 
 
+def test_hl7_node_allows_empty_ae():
+    from dcmtoolkit.model import DEST_GROUP_HL7
+    # A storage node needs an AE title...
+    assert any("AE Title" in p for p in
+               Node(name="s", aetitle="", host="h", port=2575).validate())
+    # ...but an HL7/MLLP endpoint does not.
+    hl7 = Node(name="ris", aetitle="", host="h", port=2575,
+               group=DEST_GROUP_HL7)
+    assert not any("AE Title" in p for p in hl7.validate())
+
+
 def test_csv_export_import_roundtrip(tmp_path):
     nodes = [Node(name="A", aetitle="AE_A", host="10.0.0.1", port=104,
                   calling_aetitle="CALL", group=DEST_GROUP_WORKLIST)]

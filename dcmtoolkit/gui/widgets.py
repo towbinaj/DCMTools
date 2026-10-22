@@ -148,8 +148,11 @@ class DestinationPicker(ctk.CTkFrame):
     def _on_select(self, choice: str) -> None:
         node = self.get_node()
         if node:
+            # HL7/MLLP endpoints have no AE title - show just host:port.
+            endpoint = f"{node.host}:{node.port}"
             self.detail.configure(
-                text=f"{node.aetitle} @ {node.host}:{node.port}")
+                text=f"{node.aetitle} @ {endpoint}" if node.aetitle
+                else endpoint)
             if self.remember_key:
                 self.app.remember_destination(self.remember_key, node.name)
 

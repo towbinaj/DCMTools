@@ -12,12 +12,12 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from .. import config
 from ..hl7 import mllp
 from ..hl7 import message as hmsg
+from ..model import DEST_GROUP_HL7
 from .base import ToolPanel
 from .theme import MUTED
-from .widgets import run_threaded, PAD
+from .widgets import DestinationPicker, run_threaded, PAD
 
 # Synthetic starter templates (no real patient/site data). Field separator '|',
 # encoding chars '^~\&'. Users replace the placeholder values.
@@ -52,26 +52,11 @@ class HL7SenderPanel(ToolPanel):
         self.body.grid_rowconfigure(2, weight=1)
         self.log.configure(height=120)
 
-        # Endpoint row -------------------------------------------------
-        ep = ctk.CTkFrame(self.body)
-        ep.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkLabel(ep, text="Saved").grid(row=0, column=0, padx=(PAD, 4),
-                                            pady=PAD)
-        self.saved = ctk.CTkOptionMenu(ep, width=180, values=["(none)"],
-                                       command=self._on_saved)
-        self.saved.grid(row=0, column=1, pady=PAD)
-        ctk.CTkLabel(ep, text="Host").grid(row=0, column=2, padx=(PAD, 4))
-        self.host = ctk.CTkEntry(ep, width=180)
-        self.host.grid(row=0, column=3)
-        ctk.CTkLabel(ep, text="Port").grid(row=0, column=4, padx=(PAD, 4))
-        self.port = ctk.CTkEntry(ep, width=70)
-        self.port.insert(0, "2575")      # common HL7/MLLP port
-        self.port.grid(row=0, column=5)
-        ctk.CTkButton(ep, text="Save endpoint", width=110,
-                      command=self._save_ep).grid(row=0, column=6, padx=PAD)
-        ctk.CTkButton(ep, text="Delete", width=70, fg_color="#a33",
-                      hover_color="#c44", command=self._del_ep).grid(
-            row=0, column=7, padx=(0, PAD))
+        # Endpoint: pick an HL7/MLLP destination from the Settings address book.
+        self.picker = DestinationPicker(
+            self.body, self.app, label="HL7 endpoint",
+            remember_key="HL7SenderPanel", groups=(DEST_GROUP_HL7,))
+        self.picker.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
 
         # Mode / options row ------------------------------------------
         opt = ctk.CTkFrame(self.body, fg_color="transparent")
@@ -109,46 +94,8 @@ class HL7SenderPanel(ToolPanel):
         self.type_lbl.pack(side="left", padx=PAD)
         self.msg.bind("<KeyRelease>", lambda _e: self._refresh_type())
 
-        self._refresh_saved()
-
-    # -- endpoints -------------------------------------------------------
-    def _endpoints(self) -> list:
-        return list(self.app.settings.hl7_endpoints or [])
-
-    def _refresh_saved(self) -> None:
-        names = [e.get("name", "") for e in self._endpoints() if e.get("name")]
-        self.saved.configure(values=names or ["(none)"])
-        self.saved.set(names[0] if names else "(none)")
-
-    def _on_saved(self, name: str) -> None:
-        for e in self._endpoints():
-            if e.get("name") == name:
-                self.host.delete(0, "end"); self.host.insert(0, e.get("host", ""))
-                self.port.delete(0, "end"); self.port.insert(0, str(e.get("port", "")))
-                return
-
-    def _save_ep(self) -> None:
-        host = self.host.get().strip()
-        port = self.port.get().strip()
-        if not host or not port.isdigit():
-            messagebox.showwarning("HL7", "Enter a host and numeric port first.",
-                                   parent=self)
-            return
-        name = f"{host}:{port}"
-        eps = [e for e in self._endpoints() if e.get("name") != name]
-        eps.append({"name": name, "host": host, "port": int(port)})
-        eps.sort(key=lambda e: e.get("name", "").lower())
-        self.app.settings.hl7_endpoints = eps
-        config.save_settings(self.app.settings)
-        self._refresh_saved()
-        self.saved.set(name)
-
-    def _del_ep(self) -> None:
-        name = self.saved.get()
-        eps = [e for e in self._endpoints() if e.get("name") != name]
-        self.app.settings.hl7_endpoints = eps
-        config.save_settings(self.app.settings)
-        self._refresh_saved()
+    def on_destinations_changed(self) -> None:
+        self.picker.refresh()
 
     # -- mode / message --------------------------------------------------
     def _on_mode(self, _mode: str) -> None:
@@ -205,11 +152,12 @@ class HL7SenderPanel(ToolPanel):
 
     # -- send ------------------------------------------------------------
     def _send(self) -> None:
-        host = self.host.get().strip()
-        port = self.port.get().strip()
-        if not host or not port.isdigit():
-            self.log.write("Enter a host and numeric port.")
+        node = self.picker.get_node()
+        if not node:
+            self.log.write("No HL7 endpoint selected - add one in Settings "
+                           "(+ HL7 / MLLP).")
             return
+        host, port = node.host, int(node.port)
         update = bool(self.update_msh.get())
         timeout = 10.0
 

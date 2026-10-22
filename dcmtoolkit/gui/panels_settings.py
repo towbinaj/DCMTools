@@ -10,7 +10,7 @@ import customtkinter as ctk
 from .. import config
 from ..importer import (import_legacy, import_any, export_csv, export_json)
 from ..model import (Node, DEST_GROUPS, DEST_GROUP_STORAGE,
-                     DEST_GROUP_WORKLIST, validate_aetitle)
+                     DEST_GROUP_WORKLIST, DEST_GROUP_HL7, validate_aetitle)
 from .base import ToolPanel
 from .theme import MUTED, SCALE_OPTIONS, DEFAULT_SCALE, apply_scale, scale_name
 from .widgets import PAD
@@ -74,8 +74,11 @@ class _DestRow(ctk.CTkFrame):
         self._validate_fields()
 
     def _validate_fields(self) -> None:
+        # HL7/MLLP endpoints have no AE title, so don't flag an empty one there.
+        hl7 = self.group.get() == DEST_GROUP_HL7
         self.aet.configure(border_color=(
-            "#d9695f" if validate_aetitle(self.aet.get().strip())
+            "#d9695f" if validate_aetitle(self.aet.get().strip(),
+                                          allow_empty=hl7)
             else self._def_border))
         self.calling.configure(border_color=(
             "#d9695f" if validate_aetitle(self.calling.get().strip(),
@@ -222,6 +225,9 @@ class SettingsPanel(ToolPanel):
         ctk.CTkButton(btnbar, text="+ Worklist / MPPS", width=140,
                       command=lambda: self._add_blank(DEST_GROUP_WORKLIST)
                       ).pack(side="left", padx=4)
+        ctk.CTkButton(btnbar, text="+ HL7 / MLLP", width=110,
+                      command=lambda: self._add_blank(DEST_GROUP_HL7)
+                      ).pack(side="left", padx=4)
         ctk.CTkButton(btnbar, text="Export...", width=80,
                       command=self._export).pack(side="right", padx=(4, 0))
         ctk.CTkButton(btnbar, text="Import legacy folder...", width=150,
@@ -308,7 +314,8 @@ class SettingsPanel(ToolPanel):
                     row.grid(sticky="ew", pady=1)
 
     def _add_blank(self, group: str = DEST_GROUP_STORAGE) -> None:
-        port = 104 if group == DEST_GROUP_STORAGE else 105
+        port = {DEST_GROUP_STORAGE: 104, DEST_GROUP_WORKLIST: 105,
+                DEST_GROUP_HL7: 2575}.get(group, 104)
         row = _DestRow(self.rows_frame,
                        Node(name="", aetitle="", host="", port=port,
                             group=group),

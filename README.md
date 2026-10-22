@@ -38,7 +38,7 @@ initiate to destinations *you* configure.
 | **QA / Consistency** | Scan a folder for problems (see below). |
 | **De-identify Files** | DICOM PS3.15 Basic Profile + the receiver's anonymize/morph/pixel-blank engine. |
 | **Modality SCU** | Query the Modality Worklist, then perform an exam: MPPS In Progress → stamp & send images → MPPS Completed. |
-| **HL7 Sender** | Send HL7 v2 (ADT / ORU / ORM) over MLLP and read the ACK. Paste one message or batch a folder of `.hl7` files; per-type templates; optional MSH timestamp + control-ID refresh on send. (Send-only; mimics SmartHL7.Sender.) |
+| **HL7 Sender** | Send HL7 v2 (ADT / ORU / ORM) over MLLP to an endpoint saved in Settings (**+ HL7 / MLLP** group), and read the ACK. Paste one message or batch a folder of `.hl7` files; per-type templates; optional MSH timestamp + control-ID refresh on send. (Send-only; mimics SmartHL7.Sender.) |
 
 Most tools accept **folders and `.zip` archives** (dropped or via the buttons) —
 zips are auto-extracted to a temp folder and queued, no manual unzip. Large
@@ -143,9 +143,11 @@ Add them on the **Settings** tab (**+ PACS / Storage** or **+ Worklist / MPPS**,
 on the Settings tab **saves automatically** — there's no Save button; a line at
 the bottom confirms each change. Two refinements:
 
-- **Group** — *PACS / Storage* (default) or *Worklist / MPPS*. Storage tools
-  show only storage destinations; the Modality SCU's worklist picker shows only
-  worklist/MPPS servers. Destinations sort alphabetically.
+- **Group** — *PACS / Storage* (default), *Worklist / MPPS*, or *HL7 / MLLP*.
+  Each tool's picker shows only the relevant group: storage tools show storage
+  destinations, the Modality SCU's worklist picker shows worklist/MPPS servers,
+  and the HL7 Sender shows HL7/MLLP endpoints (which need no AE title — just
+  host:port). Destinations sort alphabetically.
 - **Calling AE (optional)** — present a specific local AE title to *this*
   destination (e.g. a RIS that only answers a registered modality AE), without
   changing your app-wide My AE Title.

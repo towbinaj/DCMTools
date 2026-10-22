@@ -38,8 +38,6 @@ class Settings:
     # Where "Report a Bug" sends reports (blank -> falls back to env var or the
     # build-stamped address). Stored only in the local git-ignored settings.
     bug_report_email: str = ""
-    # Saved HL7 (MLLP) endpoints for the HL7 Sender: [{name, host, port}].
-    hl7_endpoints: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
