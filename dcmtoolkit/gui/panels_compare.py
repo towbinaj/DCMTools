@@ -1,5 +1,10 @@
 """Compare DICOM tags between two objects - two images, two series, or two
-studies - and show the differences."""
+studies - and show the differences.
+
+For series/study modes you load a folder (or files) for each side - the SAME
+folder or different ones - and pick the specific series/study from a per-side
+dropdown, so co-mingled exports can be compared series-by-series.
+"""
 
 from __future__ import annotations
 
@@ -15,12 +20,10 @@ from .theme import MUTED
 from .widgets import run_threaded, PAD
 
 _MODES = {"Images (2 files)": "images",
-          "Series (2 folders)": "series",
-          "Studies (2 folders)": "studies"}
+          "Series": "series",
+          "Studies": "studies"}
 _STATUS = {"different": "DIFF", "only_a": "A only", "only_b": "B only",
            "same": "same"}
-_STATUS_COLOR = {"different": "#d9a441", "only_a": "#4aa3a0",
-                 "only_b": "#b08cd8", "same": MUTED}
 
 
 class ComparePanel(ToolPanel):
@@ -29,40 +32,43 @@ class ComparePanel(ToolPanel):
                   "studies and see what differs.")
 
     def build(self) -> None:
-        self._a_paths: list = []
-        self._b_paths: list = []
-        self._diff: list = []
+        self._paths = {"a": [], "b": []}
+        self._groups = {"a": [], "b": []}
+        self._diff = []
+        self._summ = {"a": None, "b": None}
         self.body.grid_columnconfigure(0, weight=1)
         self.body.grid_rowconfigure(3, weight=1)
         self.log.grid_remove()
 
-        # Mode + pick A / B ------------------------------------------
         top = ctk.CTkFrame(self.body)
         top.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        top.grid_columnconfigure((1, 3), weight=1)
+        top.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(top, text="Compare").grid(row=0, column=0, padx=PAD,
-                                               pady=PAD)
+                                               pady=PAD, sticky="w")
         self.mode = ctk.CTkOptionMenu(top, values=list(_MODES),
                                       command=lambda _v: self._mode_changed())
         self.mode.grid(row=0, column=1, sticky="w", pady=PAD)
 
-        ctk.CTkButton(top, text="Choose A...", width=110,
-                      command=lambda: self._choose("a")).grid(row=1, column=0,
-                                                              padx=PAD)
-        self.a_lbl = ctk.CTkLabel(top, text="(A not set)", text_color=MUTED,
-                                  anchor="w")
-        self.a_lbl.grid(row=1, column=1, columnspan=3, sticky="ew", padx=PAD)
-        ctk.CTkButton(top, text="Choose B...", width=110,
-                      command=lambda: self._choose("b")).grid(row=2, column=0,
-                                                              padx=PAD,
-                                                              pady=(0, PAD))
-        self.b_lbl = ctk.CTkLabel(top, text="(B not set)", text_color=MUTED,
-                                  anchor="w")
-        self.b_lbl.grid(row=2, column=1, columnspan=3, sticky="ew", padx=PAD,
-                        pady=(0, PAD))
-        self._enable_drop_targets()
+        self.sel = {}
+        self.lbl = {}
+        r = 1
+        for side in ("a", "b"):
+            ctk.CTkButton(top, text=f"Choose {side.upper()}...", width=110,
+                          command=lambda s=side: self._choose(s)).grid(
+                row=r, column=0, padx=PAD, pady=(0, 2))
+            self.lbl[side] = ctk.CTkLabel(top, text=f"({side.upper()} not set)",
+                                          text_color=MUTED, anchor="w")
+            self.lbl[side].grid(row=r, column=1, sticky="ew", padx=PAD,
+                                pady=(0, 2))
+            self.sel[side] = ctk.CTkOptionMenu(top, values=["(load a folder)"],
+                                               dynamic_resizing=False, width=460)
+            self.sel[side].grid(row=r + 1, column=1, sticky="w", padx=PAD,
+                                pady=(0, PAD))
+            self.app.enable_drop(self.lbl[side],
+                                 lambda p, s=side: self._set(s, p))
+            r += 2
 
-        # Compare + filters ------------------------------------------
+        # Compare + filters
         bar = ctk.CTkFrame(self.body, fg_color="transparent")
         bar.grid(row=1, column=0, sticky="ew", padx=PAD)
         self.cmp_btn = ctk.CTkButton(bar, text="Compare", command=self._run)
@@ -93,24 +99,29 @@ class ComparePanel(ToolPanel):
                                   font=ctk.CTkFont(family="Consolas", size=12))
         self.out.grid(row=3, column=0, sticky="nsew", padx=PAD, pady=PAD)
         self.out.configure(state="disabled")
-
         self.summary = ctk.CTkLabel(self.body, text="", anchor="w",
                                     text_color=MUTED)
         self.summary.grid(row=4, column=0, sticky="w", padx=PAD, pady=(0, PAD))
 
-    # -- loading ---------------------------------------------------------
+        self._mode_changed()
+
+    # -- mode / loading --------------------------------------------------
     def _mode(self) -> str:
         return _MODES[self.mode.get()]
 
     def _mode_changed(self) -> None:
-        # Switching between file/folder modes clears prior selections.
-        self._a_paths = []; self._b_paths = []
-        self.a_lbl.configure(text="(A not set)")
-        self.b_lbl.configure(text="(B not set)")
-
-    def _enable_drop_targets(self) -> None:
-        self.app.enable_drop(self.a_lbl, lambda p: self._set("a", p))
-        self.app.enable_drop(self.b_lbl, lambda p: self._set("b", p))
+        self._paths = {"a": [], "b": []}
+        self._groups = {"a": [], "b": []}
+        picks = self._mode() != "images"
+        for side in ("a", "b"):
+            self.lbl[side].configure(text=f"({side.upper()} not set)",
+                                     text_color=MUTED)
+            if picks:
+                self.sel[side].grid()
+                self.sel[side].configure(values=["(load a folder)"])
+                self.sel[side].set("(load a folder)")
+            else:
+                self.sel[side].grid_remove()
 
     def _choose(self, side: str) -> None:
         if self._mode() == "images":
@@ -119,41 +130,77 @@ class ComparePanel(ToolPanel):
             paths = [p] if p else []
         else:
             d = filedialog.askdirectory(
-                title=f"Select {'series' if self._mode()=='series' else 'study'}"
-                      f" folder for {side.upper()}")
+                title=f"Folder for {side.upper()} "
+                      f"({'series' if self._mode()=='series' else 'study'})")
             paths = [d] if d else []
         if paths:
             self._set(side, paths)
 
     def _set(self, side: str, paths) -> None:
         paths = [str(p) for p in paths]
-        lbl = self.a_lbl if side == "a" else self.b_lbl
-        if side == "a":
-            self._a_paths = paths
-        else:
-            self._b_paths = paths
+        self._paths[side] = paths
         shown = Path(paths[0]).name if paths else "(none)"
-        lbl.configure(text=f"{side.upper()}: {shown}",
-                      text_color=("gray10", "gray90"))
+        self.lbl[side].configure(text=f"{side.upper()}: {shown}",
+                                 text_color=("gray10", "gray90"))
+        if self._mode() != "images":
+            self._enumerate(side, paths)
+
+    def _enumerate(self, side: str, paths) -> None:
+        level = self._mode()
+        self.sel[side].configure(values=["scanning..."])
+        self.sel[side].set("scanning...")
+
+        def work():
+            return compare.enumerate_groups(paths, level)
+
+        def done(groups):
+            self._groups[side] = groups
+            labels = [g.label for g in groups] or ["(no DICOM found)"]
+            self.sel[side].configure(values=labels)
+            self.sel[side].set(labels[0])
+
+        def err(exc, tb):
+            self.sel[side].configure(values=[f"error: {exc}"])
+            self.sel[side].set(f"error: {exc}")
+
+        run_threaded(self, work, done, err)
 
     # -- compare ---------------------------------------------------------
-    def _run(self) -> None:
-        if not self._a_paths or not self._b_paths:
-            self._set_out("Choose both A and B first.")
-            return
+    def _resolve(self, side: str):
+        """(dataset, SideSummary) for a side, read on the UI thread."""
         mode = self._mode()
-        a_paths, b_paths = list(self._a_paths), list(self._b_paths)
+        paths = self._paths[side]
+        if not paths:
+            raise ValueError(f"Choose {side.upper()} first.")
+        if mode == "images":
+            ds = compare.read_one(paths[0])
+            return ds, compare.SideSummary(label=side.upper(), instances=1,
+                                           series=1, studies=1)
+        groups = self._groups[side]
+        sel = self.sel[side].get()
+        g = next((x for x in groups if x.label == sel), None)
+        if g is None:
+            raise ValueError(f"Pick a {mode[:-1]} for {side.upper()}.")
+        return g.representative, compare.SideSummary(
+            label=side.upper(), instances=g.instances,
+            series=(1 if mode == "series" else g.series),
+            studies=1)
+
+    def _run(self) -> None:
+        try:
+            da, sa = self._resolve("a")
+            db, sb = self._resolve("b")
+        except ValueError as exc:
+            self._set_out(str(exc))
+            return
         self.cmp_btn.configure(state="disabled")
         self._set_out("Comparing...")
 
         def work():
-            da, sa = compare.load_side(a_paths, mode=mode, label="A")
-            db, sb = compare.load_side(b_paths, mode=mode, label="B")
             return compare.diff_datasets(da, db), sa, sb
 
         def done(result):
-            self._diff, sa, sb = result
-            self._summ_a, self._summ_b = sa, sb
+            self._diff, self._summ["a"], self._summ["b"] = result
             self._render()
             self.cmp_btn.configure(state="normal")
 
@@ -185,14 +232,11 @@ class ComparePanel(ToolPanel):
             lines.append(f"{_STATUS[r.status]:<7}{r.cls:<13}{r.tag:<13}"
                          f"{r.keyword[:25]:<26}{r.a[:35]:<36}{r.b[:35]:<36}")
         self._set_out("\n".join(lines))
-        sa, sb = self._summ_a, self._summ_b
-        note = "  ".join(n for n in (sa.note, sb.note) if n)
+        sa, sb = self._summ["a"], self._summ["b"]
         self.summary.configure(
-            text=f"A: {sa.instances} inst / {sa.series} series   |   "
-                 f"B: {sb.instances} inst / {sb.series} series   |   "
+            text=f"A: {sa.instances} img   |   B: {sb.instances} img   |   "
                  f"{counts['different']} different, {counts['only_a']} A-only, "
-                 f"{counts['only_b']} B-only, {counts['same']} same"
-                 + (f"   |   {note}" if note else ""))
+                 f"{counts['only_b']} B-only, {counts['same']} same")
 
     def _set_out(self, text: str) -> None:
         self.out.configure(state="normal")

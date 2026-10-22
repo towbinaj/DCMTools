@@ -38,6 +38,68 @@ class SideSummary:
     note: str = ""
 
 
+@dataclass
+class Group:
+    """A distinct series or study found in a loaded set."""
+    key: str                 # the Series/Study InstanceUID
+    label: str               # human label for the dropdown
+    representative: object    # a representative Dataset
+    instances: int = 0
+    series: int = 0          # (studies only) distinct series in the study
+
+
+def read_one(path):
+    return _read(Path(path))
+
+
+def _series_label(ds, count: int) -> str:
+    num = str(getattr(ds, "SeriesNumber", "") or "?")
+    mod = str(getattr(ds, "Modality", "") or "?")
+    desc = str(getattr(ds, "SeriesDescription", "") or "")
+    base = f"Series {num} · {mod}"
+    if desc:
+        base += f" · {desc}"
+    return f"{base}  ({count} img)"
+
+
+def _study_label(ds, series: int, count: int) -> str:
+    date = str(getattr(ds, "StudyDate", "") or "")
+    desc = str(getattr(ds, "StudyDescription", "") or "")
+    acc = str(getattr(ds, "AccessionNumber", "") or "")
+    parts = [p for p in (date, desc, (f"Acc {acc}" if acc else "")) if p]
+    head = " · ".join(parts) or "Study"
+    return f"{head}  ({series} series, {count} img)"
+
+
+def enumerate_groups(paths, level: str) -> list[Group]:
+    """Distinct series (level='series') or studies (level='studies') in the
+    loaded files/folders, each with a representative instance and counts."""
+    files = expand_sources([Path(p) for p in paths])
+    uid_kw = "SeriesInstanceUID" if level == "series" else "StudyInstanceUID"
+    acc: dict = {}
+    for f in files:
+        try:
+            ds = _read(f)
+        except Exception:  # noqa: BLE001
+            continue
+        key = str(getattr(ds, uid_kw, "") or "")
+        g = acc.get(key)
+        if g is None:
+            acc[key] = g = {"rep": ds, "count": 0, "series": set()}
+        g["count"] += 1
+        g["series"].add(str(getattr(ds, "SeriesInstanceUID", "") or ""))
+    out: list[Group] = []
+    for key, g in acc.items():
+        if level == "series":
+            label = _series_label(g["rep"], g["count"])
+        else:
+            label = _study_label(g["rep"], len(g["series"]), g["count"])
+        out.append(Group(key=key, label=label, representative=g["rep"],
+                         instances=g["count"], series=len(g["series"])))
+    out.sort(key=lambda gr: gr.label.lower())
+    return out
+
+
 def _clip(v: str, n: int) -> str:
     v = str(v).replace("\r", " ").replace("\n", " ")
     return v if len(v) <= n else v[:n] + "..."
