@@ -35,6 +35,7 @@ class TagListPanel(ToolPanel):
     description = "Inspect the DICOM header of a single file."
 
     def build(self) -> None:
+        self._rows = []        # all parsed tag rows for the loaded file
         bar = ctk.CTkFrame(self.body, border_width=2,
                            border_color=("gray60", "gray45"), corner_radius=10)
         bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
@@ -59,13 +60,31 @@ class TagListPanel(ToolPanel):
         else:
             self.app.enable_drop(self.drop_hint, self._on_drop, enter, leave)
 
+        # Search / filter across any column (tag, VR, keyword, value).
+        searchbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        searchbar.grid(row=1, column=0, sticky="ew", padx=PAD)
+        searchbar.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(searchbar, text="Search").grid(row=0, column=0,
+                                                    padx=(0, PAD))
+        self.search = ctk.CTkEntry(
+            searchbar, placeholder_text="filter tag / VR / keyword / value "
+            "(e.g. 0010, PatientName, CT) - space-separated terms all match")
+        self.search.grid(row=0, column=1, sticky="ew")
+        self.search.bind("<KeyRelease>", lambda _e: self._render())
+        self.match_lbl = ctk.CTkLabel(searchbar, text="", text_color=MUTED,
+                                      width=140)
+        self.match_lbl.grid(row=0, column=2, padx=PAD)
+
     def _on_drop(self, dropped: list) -> None:
         files = [Path(p) for p in dropped if Path(p).is_file()]
         if files:
             self._load(files[0])
 
     def _clear(self) -> None:
+        self._rows = []
         self.log.clear()
+        self.search.delete(0, "end")
+        self.match_lbl.configure(text="")
         self.path_lbl.configure(text="")
 
     def _open(self) -> None:
@@ -83,16 +102,33 @@ class TagListPanel(ToolPanel):
             return fileops.list_tags(path)
 
         def done(rows):
-            self.log.write(f"{'Tag':<24}{'VR':<4}{'Keyword':<28}Value")
-            self.log.write("-" * 90)
-            for r in rows:
-                self.log.write(f"{r.tag:<24}{r.vr:<4}{r.keyword:<28}{r.value}")
-            self.log.write(f"\n{len(rows)} element(s).")
+            self._rows = rows
+            # One status line in the audit log (no tag values - those may be PHI).
+            self.log._logger and self.log._logger.info(
+                "Tag Lister: %s - %d element(s)", path.name, len(rows))
+            self._render()
 
         def err(exc, tb):
-            self.log.write(f"[ERROR] {exc}")
+            self._rows = []
+            self.log.set_text(f"[ERROR] {exc}")
 
         run_threaded(self, work, done, err)
+
+    def _render(self) -> None:
+        """Render the loaded tags, filtered by the search terms (all must match
+        somewhere in a row). Written WITHOUT mirroring to the central log file."""
+        terms = [t for t in self.search.get().lower().split() if t]
+        lines = [f"{'Tag':<24}{'VR':<4}{'Keyword':<28}Value", "-" * 90]
+        shown = 0
+        for r in self._rows:
+            hay = f"{r.tag} {r.vr} {r.keyword} {r.value}".lower()
+            if all(t in hay for t in terms):
+                lines.append(f"{r.tag:<24}{r.vr:<4}{r.keyword:<28}{r.value}")
+                shown += 1
+        self.log.set_text("\n".join(lines))
+        total = len(self._rows)
+        self.match_lbl.configure(
+            text=(f"{shown} of {total}" if terms else f"{total} element(s)"))
 
 
 class _DropSourceMixin:

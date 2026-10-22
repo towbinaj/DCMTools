@@ -49,6 +49,18 @@ class LogBox(ctk.CTkTextbox):
         self.delete("1.0", "end")
         self.configure(state="disabled")
 
+    def set_text(self, text: str) -> None:
+        """Replace the whole contents WITHOUT mirroring to the central log file.
+
+        Used for views that are re-rendered as the user types (e.g. the Tag
+        Lister's live filter) and that may contain tag values (PHI) which must
+        not be written to the persistent log.
+        """
+        self.configure(state="normal")
+        self.delete("1.0", "end")
+        self.insert("end", text)
+        self.configure(state="disabled")
+
 
 def run_threaded(widget, work: Callable[[], object],
                  on_done: Callable[[object], None] | None = None,
