@@ -172,6 +172,11 @@ class Processor:
 
     # -- per-object processing ------------------------------------------
     def process(self, ds: Dataset) -> Dataset:
+        # Capture the date plan from the ORIGINAL dates up front - the Basic
+        # Profile empties PatientBirthDate / StudyDate, so we must read them
+        # before anything runs to preserve the patient's age.
+        date_plan = (self._compute_date_plan(ds)
+                     if self.cfg.calculated_dates else None)
         if self.cfg.basic_profile:
             self._apply_basic_profile(ds)
         if self.cfg.morph_tags:
@@ -184,10 +189,10 @@ class Processor:
         # KEEP rules were already honoured inside the Basic Profile above.
         self._apply_custom_mods(ds)
         if self.cfg.anonymize_tags:
-            if self.cfg.calculated_dates:
-                self._apply_calculated_dates(ds)
             self._apply_anon_rules(ds)
             self._remap_uids(ds)
+        if date_plan is not None:
+            self._apply_date_plan(ds, date_plan)
         self._apply_pixel_blanking(ds)
         return ds
 
@@ -284,25 +289,33 @@ class Processor:
             else:
                 ds[tag].value = option
 
-    def _apply_calculated_dates(self, ds: Dataset) -> None:
+    def _compute_date_plan(self, ds: Dataset) -> dict:
+        """Work out the shifted dates from the ORIGINAL object: DOB ->
+        1900-01-01, StudyDate -> 1900-01-01 + age (so age is preserved), and
+        every other date shifted by the same offset. Returns {attr: 'YYYYMMDD'}
+        plus '__had_birth' so we only set PatientBirthDate when it existed."""
         birth = _parse_date(getattr(ds, "PatientBirthDate", ""))
         study = _parse_date(getattr(ds, "StudyDate", ""))
         if birth and study:
-            age_days = (study - birth).days
-            new_study = BASELINE + timedelta(days=max(age_days, 0))
+            new_study = BASELINE + timedelta(days=max((study - birth).days, 0))
         else:
             new_study = BASELINE
-        offset = None
-        if study:
-            offset = (new_study - study).days
+        offset = (new_study - study).days if study else None
+        plan: dict = {"__had_birth": bool(getattr(ds, "PatientBirthDate", ""))}
         for attr in _DATE_TAGS:
             cur = _parse_date(getattr(ds, attr, ""))
             if cur and offset is not None:
-                nd = cur + timedelta(days=offset)
-                setattr(ds, attr, nd.strftime("%Y%m%d"))
+                plan[attr] = (cur + timedelta(days=offset)).strftime("%Y%m%d")
             elif attr == "StudyDate":
-                setattr(ds, attr, new_study.strftime("%Y%m%d"))
-        if "PatientBirthDate" in ds:
+                plan[attr] = new_study.strftime("%Y%m%d")
+        return plan
+
+    def _apply_date_plan(self, ds: Dataset, plan: dict) -> None:
+        for attr, val in plan.items():
+            if attr == "__had_birth":
+                continue
+            setattr(ds, attr, val)
+        if plan.get("__had_birth"):
             ds.PatientBirthDate = BASELINE.strftime("%Y%m%d")
 
     def _remap(self, uid: str) -> str:

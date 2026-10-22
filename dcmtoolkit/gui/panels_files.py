@@ -13,11 +13,12 @@ from ..tools import dicomtags
 from ..tools import enhanced
 from ..tools import tagclass
 from ..tools import conformance
+from ..net import scu
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .batch import BatchRunner
 from .theme import MUTED
-from .widgets import build_drop_zone, run_threaded, PAD
+from .widgets import DestinationPicker, build_drop_zone, run_threaded, PAD
 
 
 def _split(text: str) -> list[str]:
@@ -768,7 +769,9 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
                       command=lambda: self._browse_into(self.anon_file)).pack(
             side="left", padx=4)
         row("Anonymize File", anonbar)
-        self.calc_dates = ctk.CTkCheckBox(form, text="Calculated dates")
+        self.calc_dates = ctk.CTkCheckBox(
+            form, text="Shift dates (DOB → 1900-01-01, keep age; "
+            "study/series dates shifted to match)")
         row("", self.calc_dates)
         self.img_top = row("Remove Image Top %", entry(80))
         self.img_top_mod = row("  ...top modalities", entry())
@@ -785,8 +788,18 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             side="left", padx=4)
         row("Morph File", morphbar)
 
+        # Pipeline: optionally C-STORE the de-identified output to a PACS/VNA.
+        sendbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        sendbar.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, 2))
+        self.send_after = ctk.CTkCheckBox(
+            sendbar, text="Then C-STORE output to:", command=self._toggle_send)
+        self.send_after.pack(side="left")
+        self.send_picker = DestinationPicker(sendbar, self.app, label="",
+                                             remember_key="DeidentifySend")
+        self.send_picker.pack(side="left", fill="x", expand=True, padx=PAD)
+
         btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
-        btnbar.grid(row=2, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+        btnbar.grid(row=3, column=0, sticky="w", padx=PAD, pady=(0, PAD))
         self.btn = ctk.CTkButton(btnbar, text="De-identify", command=self._run)
         self.btn.pack(side="left")
         self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel",
@@ -797,8 +810,17 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self._workers_control(btnbar)
 
         self.runner = BatchRunner(self, verb="written")
-        self.runner.build(self.body).grid(row=3, column=0, sticky="nsew",
+        self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
                                           padx=PAD, pady=(0, PAD))
+
+    def _toggle_send(self) -> None:
+        if self.send_after.get():
+            self.btn.configure(text="De-identify + Send")
+        else:
+            self.btn.configure(text="De-identify")
+
+    def on_destinations_changed(self) -> None:
+        self.send_picker.refresh()
 
     def _cancel(self):
         self.runner.cancel()
@@ -952,23 +974,61 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
                 self.log.write("Cancelled: Basic Profile was off "
                                "(no identifiers would be removed).")
                 return
+        # Resolve the send destination up front (on the UI thread).
+        send_node = None
+        if self.send_after.get():
+            send_node = self.send_picker.get_node()
+            if send_node is None:
+                self.log.write("Pick a destination to send to, or untick "
+                               "'Then C-STORE output'.")
+                return
         files = list(self.files)
         base = self.base_dir
         total = len(files)
         self.btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
         self.log.write(f"--- De-identifying {total:,} file(s) -> {out} ---")
+        self._last_deident = None
 
         def worker():
-            return fileops.deidentify_files(
+            res = fileops.deidentify_files(
                 files, cfg, out, base_dir=base, progress=self.progress,
                 on_item=self.runner.on_item,
                 should_cancel=lambda: self.runner.cancelled,
                 workers=self._get_workers())
+            self._last_deident = res
+            return res
 
         def on_done():
             self.btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
+            res = self._last_deident
+            if send_node is not None and res and res.written_paths:
+                self._send_output(send_node, list(res.written_paths))
 
         self.runner.run(total, "deident", worker, on_done=on_done,
                         folder_totals=_folder_totals(files))
+
+    def _send_output(self, node, paths) -> None:
+        """C-STORE the de-identified output to ``node`` (the pipeline step)."""
+        my_ae = self.app.settings.my_aetitle
+        tls = self.app.tls_args_for(node)
+        self.log.write(f"--- C-STORE {len(paths):,} de-identified file(s) "
+                       f"to {node.name} ({node.aetitle}@{node.host}:"
+                       f"{node.port}) ---")
+        self.btn.configure(state="disabled")
+
+        def work():
+            return scu.c_store(my_ae, node, paths, progress=self.progress,
+                               tls_args=tls)
+
+        def done(result):
+            self.log.write(f"[SEND DONE] {result.sent} sent, {result.failed} "
+                           f"failed, {result.warnings} warning(s).")
+            self.btn.configure(state="normal")
+
+        def err(exc, tb):
+            self.log.write(f"[SEND ERROR] {exc}")
+            self.btn.configure(state="normal")
+
+        run_threaded(self, work, done, err)

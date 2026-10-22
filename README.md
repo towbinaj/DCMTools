@@ -109,6 +109,12 @@ strict about site identifiers (institution name/address/department/station) by
 default, with an optional **retain study dates** toggle for longitudinal use.
 The legacy anonymize-by-file / morph / top-left pixel-blanking options remain.
 
+It can also **shift dates** (DOB → 1900-01-01 with age preserved) and run as a
+**pipeline** — tick *Then C-STORE output to:* to push the de-identified copies
+straight to a PACS/VNA after processing. See the
+**[de-identification & anonymization how-to](docs/anonymization-guide.md)** for
+profiles, tag selection, date shifting, morphing, and the pipeline.
+
 > ⚠ The Basic Profile is an **attribute** profile — it does **not** remove
 > burned-in pixel text. Use the Remove-Image options and/or the **Preview** /
 > **QA → Render** checks to catch burned-in PHI.

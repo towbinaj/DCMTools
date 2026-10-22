@@ -471,6 +471,7 @@ class DeidentResult:
     written: int = 0
     failed: int = 0
     errors: list[str] = field(default_factory=list)
+    written_paths: list = field(default_factory=list)   # output files (for piping)
 
 
 def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
@@ -527,6 +528,7 @@ def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
             ok, detail = True, dest.name
             with lock:
                 result.written += 1
+                result.written_paths.append(dest)
         except Exception as exc:  # noqa: BLE001 - never abort the batch
             detail = str(exc).strip().replace("\n", " ")[:200] or "error"
             with lock:
