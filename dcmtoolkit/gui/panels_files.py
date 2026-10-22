@@ -12,6 +12,7 @@ from ..tools import fileops
 from ..tools import dicomtags
 from ..tools import enhanced
 from ..tools import tagclass
+from ..tools import conformance
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .batch import BatchRunner
@@ -37,6 +38,8 @@ class TagListPanel(ToolPanel):
 
     def build(self) -> None:
         self._rows = []        # all parsed tag rows for the loaded file
+        self._path = None
+        self._conf = ({}, [], "")   # (per_tag code map, missing list, note)
         bar = ctk.CTkFrame(self.body, border_width=2,
                            border_color=("gray60", "gray45"), corner_radius=10)
         bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
@@ -89,6 +92,22 @@ class TagListPanel(ToolPanel):
             var.pack(side="left", padx=4)
             self.class_vars[cls] = var
 
+        # Validity: VR/value check always; optional IOD conformance overlay.
+        valbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        valbar.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(2, 0))
+        self.conf_chk = ctk.CTkCheckBox(valbar, text="Check IOD conformance",
+                                        command=self._reload_for_conf)
+        if not conformance.available():
+            self.conf_chk.configure(state="disabled",
+                                    text="Check IOD conformance (unavailable)")
+        self.conf_chk.pack(side="left")
+        ctk.CTkLabel(
+            valbar, text="Status:  ✓ valid   ✗ error "
+            "(bad value / empty-required / not-allowed)   "
+            "⚠ not in IOD (strict)   · n/a",
+            text_color=MUTED, font=ctk.CTkFont(size=11)).pack(side="left",
+                                                             padx=PAD)
+
     def _on_drop(self, dropped: list) -> None:
         files = [Path(p) for p in dropped if Path(p).is_file()]
         if files:
@@ -96,6 +115,8 @@ class TagListPanel(ToolPanel):
 
     def _clear(self) -> None:
         self._rows = []
+        self._path = None
+        self._conf = ({}, [], "")
         self.log.clear()
         self.search.delete(0, "end")
         for v in self.class_vars.values():
@@ -110,25 +131,51 @@ class TagListPanel(ToolPanel):
         if p:
             self._load(Path(p))
 
+    def _reload_for_conf(self) -> None:
+        if self._path is not None:
+            self._load(self._path)
+
     def _load(self, path: Path) -> None:
+        self._path = path
         self.path_lbl.configure(text=path.name)
         self.log.clear()
+        want_conf = bool(self.conf_chk.get())
 
         def work():
-            return fileops.list_tags(path)
+            rows = fileops.list_tags(path)
+            conf = (conformance.issues_for_file(path) if want_conf
+                    else ({}, [], ""))
+            return rows, conf
 
-        def done(rows):
-            self._rows = rows
+        def done(result):
+            self._rows, self._conf = result
             # One status line in the audit log (no tag values - those may be PHI).
             self.log._logger and self.log._logger.info(
-                "Tag Lister: %s - %d element(s)", path.name, len(rows))
+                "Tag Lister: %s - %d element(s)", path.name, len(self._rows))
             self._render()
 
         def err(exc, tb):
             self._rows = []
+            self._conf = ({}, [], "")
             self.log.set_text(f"[ERROR] {exc}")
 
         run_threaded(self, work, done, err)
+
+    def _status_icon(self, row) -> str:
+        """Icon for a row: IOD conformance code (if checked) else VR validity."""
+        per_tag = self._conf[0]
+        tag_int = tagclass._TAG_RE.search(row.tag or "")
+        if tag_int:
+            key = int(tag_int.group(1), 16) << 16 | int(tag_int.group(2), 16)
+            code = per_tag.get(key)
+            if code == "TagUnexpected":
+                return "⚠"                      # warn
+            if code in ("TagEmpty", "TagNotAllowed", "EnumValueNotAllowed"):
+                return "✗"                      # error
+        if row.vr == "SQ":
+            return "·"
+        ok, _ = dicomtags.validate(row.vr, row.value)
+        return "✓" if ok else "✗"
 
     def _render(self) -> None:
         """Render the loaded tags, filtered by the search terms (all must match
@@ -136,8 +183,20 @@ class TagListPanel(ToolPanel):
         to the central log file (tag values may be PHI)."""
         terms = [t for t in self.search.get().lower().split() if t]
         sel = {c for c, v in self.class_vars.items() if v.get()}
-        lines = [f"{'Class':<13}{'Tag':<24}{'VR':<4}{'Keyword':<28}Value",
-                 "-" * 100]
+        _missing, _note = self._conf[1], self._conf[2]
+        header = []
+        if self.conf_chk.get():
+            if _note:
+                header.append(f"[IOD] {_note}")
+            if _missing:
+                header.append(f"[IOD] {len(_missing)} required tag(s) MISSING: "
+                              + ", ".join(_missing[:12])
+                              + (" ..." if len(_missing) > 12 else ""))
+            if header:
+                header.append("")
+        lines = header + [
+            f"{'St':<3}{'Class':<13}{'Tag':<24}{'VR':<4}{'Keyword':<28}Value",
+            "-" * 100]
         shown = 0
         for r in self._rows:
             cls = tagclass.classify_tag_str(r.tag)
@@ -145,8 +204,9 @@ class TagListPanel(ToolPanel):
                 continue
             hay = f"{r.tag} {r.vr} {r.keyword} {r.value} {cls}".lower()
             if all(t in hay for t in terms):
-                lines.append(
-                    f"{cls:<13}{r.tag:<24}{r.vr:<4}{r.keyword:<28}{r.value}")
+                icon = self._status_icon(r)
+                lines.append(f"{icon:<3}{cls:<13}{r.tag:<24}{r.vr:<4}"
+                             f"{r.keyword:<28}{r.value}")
                 shown += 1
         self.log.set_text("\n".join(lines))
         total = len(self._rows)

@@ -127,3 +127,16 @@ def test_render_image_color_sample():
         pytest.skip("sample unavailable")
     img = render.render_image(dcmread(p), 0)
     assert isinstance(img, Image.Image) and img.mode == "RGB"
+
+
+def test_conformance_issues_structured():
+    import pytest
+    from dcmtoolkit.tools import conformance
+    if not conformance.available():
+        pytest.skip("DICOM standard not bundled")
+    ds = make_ct()
+    ds.OtherPatientIDs = "X"          # retired -> TagUnexpected
+    per_tag, missing, note = conformance.conformance_issues(ds)
+    assert note == ""
+    assert per_tag.get(0x00101000) == "TagUnexpected"
+    assert isinstance(missing, list)

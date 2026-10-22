@@ -68,6 +68,36 @@ inspection alone can't:
 Findings are colour-coded, filterable by category, and exportable to CSV.
 Everything runs **offline** — no image data leaves the machine.
 
+### Legend — finding categories and violation codes
+
+QA finding **categories**:
+
+| Category | Meaning |
+|----------|---------|
+| `incongruent` | Attributes that should match within a Patient/Study/Series but differ |
+| `abnormal` | Value fails its VR (bad date/number, over-length) — or an unreadable file |
+| `missing` | An absent Type-1 identity UID (SOP / Study / Series / SOPClass) |
+| `duplicate` | Same `SOPInstanceUID` in more than one file |
+| `mismatch` | A folder mixing multiple studies or series |
+| `conformance` | IOD conformance violations (codes below) |
+| `transfer` | Transfer-syntax / SOP-class mix, and C-STORE send-ability failures |
+| `render` | Pixel data won't decode / display |
+
+IOD **conformance** violation codes (against Type 1 / 1C / 2 / 2C / 3 rules):
+
+| Code | Meaning |
+|------|---------|
+| `TagMissing` | A required attribute is absent |
+| `TagEmpty` | A Type-1/1C attribute is present but empty (must have a value) |
+| `TagUnexpected` | An attribute present that isn't defined for this IOD (optional/retired extras) — strict validators flag these; real systems usually accept them |
+| `TagNotAllowed` | An attribute present that a condition says must be absent |
+| `EnumValueNotAllowed` | A value isn't in the allowed enumerated set (e.g. `PatientSex` not M/F/O) |
+
+The **Tag Lister** shows a per-tag status icon: **✓** valid · **✗** error (bad
+value, empty-required, or not-allowed) · **⚠** present but not in the IOD
+(`TagUnexpected`) · **·** not evaluated. Tick **Check IOD conformance** to drive
+the icons from the codes above and list any missing required tags.
+
 ## De-identification
 
 The **De-identify Files** tool (same engine as the Store Receiver) offers a

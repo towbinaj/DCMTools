@@ -86,6 +86,34 @@ class QAPanel(_DropSourceMixin, ToolPanel):
                                         state="disabled",
                                         command=self._export)
         self.export_btn.pack(side="right")
+        ctk.CTkButton(bar, text="Legend", width=80,
+                      command=self._show_legend).pack(side="right", padx=PAD)
+
+    _LEGEND = (
+        "QA finding categories:\n"
+        "  incongruent - attributes that should match within a "
+        "Patient/Study/Series but differ\n"
+        "  abnormal    - value fails its VR (bad date/number, over-length) or "
+        "unreadable file\n"
+        "  missing     - an absent Type-1 identity UID (SOP/Study/Series/"
+        "SOPClass)\n"
+        "  duplicate   - same SOPInstanceUID in more than one file\n"
+        "  mismatch    - a folder mixing multiple studies or series\n"
+        "  conformance - IOD conformance violations (codes below)\n"
+        "  transfer    - transfer-syntax / SOP-class mix, and C-STORE "
+        "send-ability failures\n"
+        "  render      - pixel data won't decode / display\n\n"
+        "IOD conformance violation codes (vs Type 1/1C/2/2C/3 rules):\n"
+        "  TagMissing          - a required attribute is absent\n"
+        "  TagEmpty            - a Type-1/1C attribute is present but empty\n"
+        "  TagUnexpected       - attribute not defined for this IOD "
+        "(optional/retired extras; usually accepted by real systems)\n"
+        "  TagNotAllowed       - attribute present that a condition forbids\n"
+        "  EnumValueNotAllowed - value not in the allowed enumerated set")
+
+    def _show_legend(self) -> None:
+        from tkinter import messagebox
+        messagebox.showinfo("QA legend", self._LEGEND, parent=self)
 
         statusf = ctk.CTkFrame(self.body, fg_color="transparent")
         statusf.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(PAD, 0))

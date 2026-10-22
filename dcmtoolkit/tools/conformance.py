@@ -108,3 +108,50 @@ def conformance_errors(ds: Dataset) -> list[str]:
             out.append(f"{module} / {dtag} {kw}: {_name(terr.code)} "
                        f"(Type {terr.type})")
     return out
+
+
+def conformance_issues(ds: Dataset):
+    """Structured per-tag IOD conformance result for icon overlays.
+
+    Returns ``(per_tag, missing, note)`` where ``per_tag`` maps an int tag ->
+    its violation code name (for tags *present* in the object: TagEmpty,
+    TagUnexpected, TagNotAllowed, EnumValueNotAllowed), ``missing`` is a list of
+    required tags that are *absent* (TagMissing), and ``note`` is a short status
+    string (e.g. unknown SOP class) or ''. Never raises.
+    """
+    _load()
+    if _dicom_info is None:
+        return {}, [], "IOD standard not available"
+    try:
+        from dicom_validator.validator.iod_validator import IODValidator
+        from dicom_validator.validator.validation_result import Status
+        result = IODValidator(ds, _dicom_info,
+                              log_level=logging.ERROR).validate()
+    except Exception as exc:  # noqa: BLE001
+        return {}, [], f"validator error: {str(exc).strip()[:80]}"
+    if result.status == Status.UnknownSOPClassUID:
+        return {}, [], f"unknown SOP class {result.sop_class_uid}"
+    if result.status in (Status.MissingSOPClassUID, Status.InvalidFile):
+        return {}, [], "not a validatable DICOM object"
+
+    per_tag: dict[int, str] = {}
+    missing: list[str] = []
+    for tag_errors in result.module_errors.values():
+        for dtag, terr in tag_errors.items():
+            code = _name(terr.code)
+            if code == "TagMissing":
+                kw = keyword_for_tag(dtag.tag) or ""
+                missing.append(f"{kw or ''} ({dtag})".strip())
+            else:
+                per_tag[int(dtag.tag)] = code
+    return per_tag, missing, ""
+
+
+def issues_for_file(path):
+    """``conformance_issues`` for a file path (reads header only)."""
+    from pydicom import dcmread
+    try:
+        ds = dcmread(str(path), force=True, stop_before_pixels=True)
+    except Exception as exc:  # noqa: BLE001
+        return {}, [], f"unreadable: {str(exc).strip()[:80]}"
+    return conformance_issues(ds)
