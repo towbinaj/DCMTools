@@ -11,6 +11,7 @@ from .. import config
 from ..tools import fileops
 from ..tools import dicomtags
 from ..tools import enhanced
+from ..tools import tagclass
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .batch import BatchRunner
@@ -75,6 +76,19 @@ class TagListPanel(ToolPanel):
                                       width=140)
         self.match_lbl.grid(row=0, column=2, padx=PAD)
 
+        # Multi-select class toggles (Patient / Study / Series / ...).
+        classbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        classbar.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(2, 0))
+        ctk.CTkLabel(classbar, text="Show classes:").pack(side="left",
+                                                          padx=(0, PAD))
+        self.class_vars = {}
+        for cls in tagclass.CLASSES:
+            var = ctk.CTkCheckBox(classbar, text=cls, width=20,
+                                  command=self._render)
+            var.select()
+            var.pack(side="left", padx=4)
+            self.class_vars[cls] = var
+
     def _on_drop(self, dropped: list) -> None:
         files = [Path(p) for p in dropped if Path(p).is_file()]
         if files:
@@ -84,6 +98,8 @@ class TagListPanel(ToolPanel):
         self._rows = []
         self.log.clear()
         self.search.delete(0, "end")
+        for v in self.class_vars.values():
+            v.select()
         self.match_lbl.configure(text="")
         self.path_lbl.configure(text="")
 
@@ -116,19 +132,27 @@ class TagListPanel(ToolPanel):
 
     def _render(self) -> None:
         """Render the loaded tags, filtered by the search terms (all must match
-        somewhere in a row). Written WITHOUT mirroring to the central log file."""
+        somewhere in a row) AND the selected classes. Written WITHOUT mirroring
+        to the central log file (tag values may be PHI)."""
         terms = [t for t in self.search.get().lower().split() if t]
-        lines = [f"{'Tag':<24}{'VR':<4}{'Keyword':<28}Value", "-" * 90]
+        sel = {c for c, v in self.class_vars.items() if v.get()}
+        lines = [f"{'Class':<13}{'Tag':<24}{'VR':<4}{'Keyword':<28}Value",
+                 "-" * 100]
         shown = 0
         for r in self._rows:
-            hay = f"{r.tag} {r.vr} {r.keyword} {r.value}".lower()
+            cls = tagclass.classify_tag_str(r.tag)
+            if cls not in sel:
+                continue
+            hay = f"{r.tag} {r.vr} {r.keyword} {r.value} {cls}".lower()
             if all(t in hay for t in terms):
-                lines.append(f"{r.tag:<24}{r.vr:<4}{r.keyword:<28}{r.value}")
+                lines.append(
+                    f"{cls:<13}{r.tag:<24}{r.vr:<4}{r.keyword:<28}{r.value}")
                 shown += 1
         self.log.set_text("\n".join(lines))
         total = len(self._rows)
         self.match_lbl.configure(
-            text=(f"{shown} of {total}" if terms else f"{total} element(s)"))
+            text=(f"{shown} of {total}" if (terms or len(sel) < len(self.class_vars))
+                  else f"{total} element(s)"))
 
 
 class _DropSourceMixin:
