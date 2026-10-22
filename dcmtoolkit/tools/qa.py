@@ -62,6 +62,16 @@ def _short(uid: str) -> str:
     return uid if len(uid) <= 24 else "..." + uid[-20:]
 
 
+def _uid_name(uid: str) -> str:
+    """Human name for a transfer-syntax / SOP-class UID, else the UID itself."""
+    try:
+        from pydicom.uid import UID
+        n = UID(str(uid)).name
+        return n if n and n != str(uid) else str(uid)
+    except Exception:  # noqa: BLE001
+        return str(uid)
+
+
 def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
             conformance: bool = False, sendability: bool = False,
             render: bool = False) -> QAResult:
@@ -92,6 +102,9 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
             # DICOMDIR and other Media Storage Directory files are not image
             # instances - exclude them from the instance-level checks.
             fm = getattr(ds, "file_meta", None)
+            ts = getattr(fm, "TransferSyntaxUID", "") if fm is not None else ""
+            rec["__ts"] = str(ts)
+            rec["__ts_name"] = str(getattr(ts, "name", "") or "")
             msc = str(getattr(fm, "MediaStorageSOPClassUID", "") or "") \
                 if fm is not None else ""
             if msc == "1.2.840.10008.1.3.10" or f.name.upper() == "DICOMDIR":
@@ -151,7 +164,7 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
             findings.append(Finding(
                 "conformance",
                 f"{name}: {len(errs)} IOD conformance issue(s)",
-                "  |  ".join(errs)[:800]))
+                "  |  ".join(errs)))   # full list (not truncated) for triage
 
     # Render / pixel-decode - only when requested
     for r in good:
@@ -225,6 +238,29 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
                 "mismatch", f"Folder mixes {len(series)} series: "
                 f"{Path(fo).name}",
                 "; ".join(_short(s) for s in list(series)[:5])))
+
+    # Transfer-syntax and SOP-class distribution. A receiver negotiates a
+    # *presentation context* = SOP class + transfer syntax, so this is the first
+    # thing to check when a strict VNA rejects objects a lenient PACS accepts.
+    if good:
+        from collections import Counter
+        ts_counts: Counter = Counter()
+        ts_uid: dict[str, str] = {}
+        for r in good:
+            label = r.get("__ts_name") or r.get("__ts") or "(unknown)"
+            ts_counts[label] += 1
+            ts_uid.setdefault(label, r.get("__ts", ""))
+        for label, n in sorted(ts_counts.items(), key=lambda x: -x[1]):
+            findings.append(Finding(
+                "transfer", f"Transfer syntax: {label}  ({n} file(s))",
+                f"{label}  [{ts_uid.get(label, '')}]  - {n} of {len(good)} "
+                f"file(s)"))
+        sop_counts: Counter = Counter(
+            r.get("SOPClassUID", "") for r in good if r.get("SOPClassUID"))
+        for uid, n in sorted(sop_counts.items(), key=lambda x: -x[1]):
+            findings.append(Finding(
+                "transfer", f"SOP class: {_uid_name(uid)}  ({n} file(s))",
+                f"{_uid_name(uid)}  [{uid}]  - {n} of {len(good)} file(s)"))
 
     # C-STORE send-ability: round-trip each file through a built-in standard
     # archive to catch transfer-syntax / SOP-class problems a file-level check

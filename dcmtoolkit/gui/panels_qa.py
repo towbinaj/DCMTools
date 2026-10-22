@@ -32,8 +32,9 @@ _CATEGORIES = ["All", "incongruent", "abnormal", "missing", "duplicate",
 
 class QAPanel(_DropSourceMixin, ToolPanel):
     title = "QA / Consistency"
-    description = ("Scan files for incongruent, abnormal, missing, or "
-                  "duplicate tags.")
+    description = ("Scan files for incongruent, abnormal, missing or duplicate "
+                  "tags, and report the transfer-syntax / SOP-class mix "
+                  "(filter: transfer).")
     # Each load replaces the queue, so a new folder is scanned on its own
     # (not piled together with the previously loaded one).
     LOAD_REPLACES = True

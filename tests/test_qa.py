@@ -29,6 +29,24 @@ def test_detects_incongruent_and_duplicate(tmp_path):
     assert "duplicate" in cats
 
 
+def test_transfer_syntax_and_sop_class_report(tmp_path):
+    # Two different transfer syntaxes -> both reported under 'transfer'.
+    from pydicom.uid import ExplicitVRLittleEndian, ImplicitVRLittleEndian
+    a = make_ct(); a.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    save(a, tmp_path / "a.dcm")
+    b = make_ct(); b.file_meta.TransferSyntaxUID = ImplicitVRLittleEndian
+    save(b, tmp_path / "b.dcm")
+    res = qa.qa_scan(sorted(tmp_path.glob("*.dcm")), workers=1)
+    ts = [f for f in res.findings
+          if f.category == "transfer" and f.summary.startswith("Transfer syntax")]
+    sop = [f for f in res.findings
+           if f.category == "transfer" and f.summary.startswith("SOP class")]
+    blob = " ".join(f.summary for f in ts)
+    assert "Explicit VR Little Endian" in blob
+    assert "Implicit VR Little Endian" in blob
+    assert sop and "CT Image Storage" in " ".join(f.summary for f in sop)
+
+
 def test_missing_required_tag(tmp_path):
     ds = make_ct()
     del ds.SeriesInstanceUID
@@ -53,8 +71,11 @@ def test_sendability_flags_private_sop(tmp_path):
     save(make_ct(SOPClassUID="1.2.840.10008.5.1.4.1.1.999.77"),
          tmp_path / "priv.dcm")
     res = qa.qa_scan(sorted(tmp_path.glob("*.dcm")), sendability=True, workers=2)
-    transfer = [f for f in res.findings if f.category == "transfer"]
-    assert len(transfer) == 1 and "priv.dcm" in transfer[0].summary
+    # The 'transfer' category now also carries TS/SOP-class summaries, so match
+    # the send-ability failure specifically.
+    failed = [f for f in res.findings
+              if f.category == "transfer" and "not send-able" in f.summary]
+    assert len(failed) == 1 and "priv.dcm" in failed[0].summary
 
 
 def test_render_flags_broken_pixels(tmp_path):

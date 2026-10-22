@@ -44,9 +44,13 @@ transfers run in parallel with a progress bar + Cancel.
 
 ## Validation (QA / Consistency)
 
-Load a folder or zip and scan. On top of the built-in tag checks
-(incongruent / abnormal / missing / duplicate / folder-mismatch), three opt-in
-checks cover the axes file inspection alone can't:
+Load a folder or zip and scan. Alongside the built-in tag checks
+(incongruent / abnormal / missing / duplicate / folder-mismatch), every scan
+also reports the **transfer-syntax and SOP-class mix** of the dataset (filter:
+*transfer*) — a receiver negotiates a *presentation context* (SOP class +
+transfer syntax), so this is the first thing to check when a strict VNA rejects
+objects a lenient PACS accepts. Three further opt-in checks cover the axes file
+inspection alone can't:
 
 - **IOD conformance** — does each object match the DICOM standard's required
   modules and Type-1/1C/2/2C attributes for its SOP class (via a copy of the
