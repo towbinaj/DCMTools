@@ -17,6 +17,17 @@ def test_scrub_removes_names_and_long_numbers():
     assert support.scrub("3 of 12 files") == "3 of 12 files"
 
 
+def test_scrub_redacts_labeled_phi_without_caret():
+    # A bare surname in our own log lines has no caret, so it must be caught by
+    # the label rule, not the DICOM-PN rule.
+    out = support.scrub("Patient Name query: TESTSURNAME*")
+    assert "TESTSURNAME" not in out and "[PHI]" in out
+    assert "MRN99" not in support.scrub("Patient ID: MRN99")
+    assert "ACC7" not in support.scrub("Accession = ACC7")
+    # ordinary text is left alone
+    assert support.scrub("read 3 files") == "read 3 files"
+
+
 def test_scrub_removes_site_infrastructure():
     # IP, AE@host:port node, and user-home path components must be redacted.
     # Uses RFC 5737 documentation addresses + a fake AE, never real values.

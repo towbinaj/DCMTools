@@ -324,9 +324,25 @@ class SettingsPanel(ToolPanel):
                        on_change=self._autosave)
         self._rows.append(row)
         self._relayout()
+        # Scroll the new row into view - a new HL7/MLLP or Worklist row lands at
+        # the bottom of a long list, so without this it looks like nothing
+        # happened. Also confirm in the status line.
+        self._scroll_into_view(row)
         row.name.focus_set()
+        self._flash_saved(f"Added a blank {group} row below - fill it in")
         # New blank row has no AE/host yet, so _autosave won't persist it until
         # it's filled in (to_node skips empty rows).
+
+    def _scroll_into_view(self, row) -> None:
+        self.rows_frame.update_idletasks()
+        canvas = getattr(self.rows_frame, "_parent_canvas", None)
+        if canvas is None:
+            return
+        try:
+            inner_h = self.rows_frame.winfo_height() or 1
+            canvas.yview_moveto(max(0.0, min(1.0, row.winfo_y() / inner_h)))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _append_row(self, node: Node) -> None:
         """Add a row for ``node`` (caller calls ``_relayout`` when done)."""

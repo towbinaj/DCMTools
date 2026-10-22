@@ -56,6 +56,12 @@ import getpass  # noqa: E402
 
 _PN_RE = re.compile(r"[A-Za-z][\w'-]*\^[\w'^ -]+")          # DICOM PN (Last^First)
 _NUM_RE = re.compile(r"(?<![\w.])\d{5,}(?![\w.])")          # long id/accession runs
+# Redact the VALUE after a label that carries a patient name/ID in our own log
+# lines (e.g. "Patient Name query: SMITH*") - a bare surname has no caret, so
+# _PN_RE misses it.
+_LABELED_PHI_RE = re.compile(
+    r"(?i)\b((?:patient\s*name|name|patient\s*id|mrn|accession)"
+    r"\s*(?:query)?\s*[:=]\s*)(\S+)")
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")        # IPv4 (optionally :port)
 _NODE_RE = re.compile(r"\b[\w-]{1,32}@[\w.\-]+(?::\d+)?")   # AE@host[:port]
 # \Users\<name>, /home/<name>, /Users/<name> -> redact the user component only.
@@ -68,6 +74,7 @@ def scrub(text: str) -> str:
     """Redact likely PHI and site/infrastructure identifiers from log text."""
     text = _NODE_RE.sub("[NODE]", text)        # before IP, so host in AE@host goes too
     text = _IP_RE.sub("[IP]", text)
+    text = _LABELED_PHI_RE.sub(r"\1[PHI]", text)   # value after a name/ID label
     text = _PN_RE.sub("[NAME]", text)
     text = _USERPATH_RE.sub(r"\1[USER]", text)
     text = _UNC_RE.sub(r"\\\\[HOST]", text)
