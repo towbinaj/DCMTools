@@ -35,6 +35,7 @@ initiate to destinations *you* configure.
 | **Patient / Study / Series Info** | Edit demographics across a loaded study in labelled fields, with live DICOM VR validation. |
 | **Enhanced → Classic** | Convert Enhanced CT/MR/PET multi-frame objects to classic single-frame DICOM (functional groups flattened). |
 | **Preview** | Render an object's pixels to a thumbnail (grayscale/color, multi-frame) for a visual spot-check. |
+| **Compare** | Diff the DICOM tags of two images, two series, or two studies (representative instance per side): see different / A-only / B-only / same, filter to differences, by tag class, or by text, and export CSV. |
 | **QA / Consistency** | Scan a folder for problems (see below). |
 | **De-identify Files** | DICOM PS3.15 Basic Profile + the receiver's anonymize/morph/pixel-blank engine. |
 | **Modality SCU** | Query the Modality Worklist, then perform an exam: MPPS In Progress → stamp & send images → MPPS Completed. |
