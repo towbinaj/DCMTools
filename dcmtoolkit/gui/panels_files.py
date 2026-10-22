@@ -194,14 +194,23 @@ class TagListPanel(ToolPanel):
         to the central log file (tag values may be PHI)."""
         terms = [t for t in self.search.get().lower().split() if t]
         sel = {c for c, v in self.class_vars.items() if v.get()}
-        _missing, _note = self._conf[1], self._conf[2]
+        _per_tag, _missing, _note = self._conf
         header = []
         if self.conf_chk.get():
             if _note:
-                header.append(f"[IOD] {_note}")
+                header.append(f"[IOD conformance] {_note}")
+            elif self._rows:
+                warn = sum(1 for c in _per_tag.values() if c == "TagUnexpected")
+                err = sum(1 for c in _per_tag.values() if c != "TagUnexpected")
+                if warn or err or _missing:
+                    header.append(
+                        f"[IOD conformance]  {_missing and len(_missing) or 0} "
+                        f"required MISSING,  {err} error(s),  "
+                        f"{warn} not-in-IOD (⚠)")
+                else:
+                    header.append("[IOD conformance]  conformant - no issues")
             if _missing:
-                header.append(f"[IOD] {len(_missing)} required tag(s) MISSING: "
-                              + ", ".join(_missing[:12])
+                header.append("  missing: " + ", ".join(_missing[:12])
                               + (" ..." if len(_missing) > 12 else ""))
             if header:
                 header.append("")
