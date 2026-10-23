@@ -157,20 +157,23 @@ class AnonProfileDialog(ctk.CTkToplevel):
     def _explain_basic(self) -> None:
         messagebox.showinfo(
             "PS3.15 Basic Confidentiality Profile",
-            "The Basic Profile removes or empties the DICOM standard's "
-            "confidentiality attributes, including:\n\n"
-            "  - Patient Name and other names; Patient ID & other IDs\n"
-            "  - Birth date and other patient dates; age, sex kept\n"
+            "REMOVED or EMPTIED:\n"
+            "  - Patient Name and other names\n"
+            "  - Patient ID and other patient IDs\n"
+            "  - Birth date and other patient dates\n"
             "  - Addresses, phone numbers, comments\n"
-            "  - Institution name/address/department, station/device IDs\n"
+            "  - Institution name / address / department; station & device IDs\n"
             "  - Referring / performing / operator physician names\n"
-            "  - Study & series dates/times (unless 'Retain study dates')\n"
+            "  - Study and series dates & times (unless 'Retain study dates')\n"
             "  - All private tags\n"
-            "  - UIDs are re-mapped consistently across the batch\n\n"
-            "It then stamps the de-identification markers "
+            "  - UIDs (re-mapped consistently across the batch)\n\n"
+            "KEPT:\n"
+            "  - Patient age and sex\n"
+            "  - Image / pixel data\n"
+            "  - Standard non-identifying tags (e.g. technical / acquisition)\n\n"
+            "It also stamps the de-identification markers "
             "(PatientIdentityRemoved=YES, code 113100).\n\n"
-            "It does NOT remove burned-in pixel text, and it leaves standard "
-            "non-identifying tags (e.g. technical/acquisition tags) in place.",
+            "Note: it does NOT remove burned-in pixel text.",
             parent=self)
 
     # -- helpers ---------------------------------------------------------
