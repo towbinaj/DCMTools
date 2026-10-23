@@ -13,6 +13,7 @@ from pydicom import dcmread
 from pydicom.tag import Tag
 
 from . import tagclass
+from . import validity
 from .fileops import find_dicom_files, expand_sources
 
 _PIXEL = Tag(0x7FE0, 0x0010)
@@ -26,6 +27,7 @@ class DiffRow:
     a: str
     b: str
     status: str       # same | different | only_a | only_b
+    validity: str = "na"   # valid | error | warn | na (worst of A/B)
 
 
 @dataclass
@@ -119,17 +121,23 @@ def dataset_tags(ds) -> dict:
     for elem in ds:
         if elem.tag == _PIXEL:
             continue
-        out[(elem.tag.group, elem.tag.element)] = (elem.keyword or "",
-                                                   _elem_value(elem))
+        out[(elem.tag.group, elem.tag.element)] = (
+            elem.keyword or "", _elem_value(elem), elem.VR or "")
     return out
 
 
-def diff_datasets(a, b, *, max_len: int = 200) -> list[DiffRow]:
-    """Tag-by-tag diff of two datasets, sorted by tag."""
+def diff_datasets(a, b, *, max_len: int = 200,
+                  conf_a: dict | None = None,
+                  conf_b: dict | None = None) -> list[DiffRow]:
+    """Tag-by-tag diff of two datasets, sorted by tag. ``conf_a``/``conf_b`` are
+    optional per-tag IOD conformance code maps (int tag -> code) that sharpen the
+    per-row validity bucket."""
+    conf_a, conf_b = conf_a or {}, conf_b or {}
     ta, tb = dataset_tags(a), dataset_tags(b)
     rows: list[DiffRow] = []
     for key in sorted(set(ta) | set(tb)):
         g, e = key
+        tag_int = (g << 16) | e
         ka, kb = ta.get(key), tb.get(key)
         keyword = (ka or kb)[0]
         av = ka[1] if ka else ""
@@ -140,9 +148,12 @@ def diff_datasets(a, b, *, max_len: int = 200) -> list[DiffRow]:
             status = "only_a"
         else:
             status = "only_b"
+        sa = (validity.status(ka[2], av, conf_a.get(tag_int)) if ka else "na")
+        sb = (validity.status(kb[2], bv, conf_b.get(tag_int)) if kb else "na")
         rows.append(DiffRow(f"({g:04X},{e:04X})", keyword,
                             tagclass.classify(g, e),
-                            _clip(av, max_len), _clip(bv, max_len), status))
+                            _clip(av, max_len), _clip(bv, max_len), status,
+                            validity.worst(sa, sb)))
     return rows
 
 

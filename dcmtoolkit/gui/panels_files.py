@@ -13,6 +13,7 @@ from ..tools import dicomtags
 from ..tools import enhanced
 from ..tools import tagclass
 from ..tools import conformance
+from ..tools import validity
 from ..net import scu
 from ..store.processing import ReceiverConfig
 from .base import ToolPanel
@@ -99,7 +100,8 @@ class TagListPanel(ToolPanel):
                       command=lambda: self._set_all_classes(False)).pack(
             side="left", padx=2)
 
-        # Validity: VR/value check always; optional IOD conformance overlay.
+        # Validity: VR/value check always; optional IOD conformance overlay,
+        # plus multi-select status filters.
         valbar = ctk.CTkFrame(self.body, fg_color="transparent")
         valbar.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(2, 0))
         self.conf_chk = ctk.CTkCheckBox(valbar, text="Check IOD conformance",
@@ -107,13 +109,16 @@ class TagListPanel(ToolPanel):
         if not conformance.available():
             self.conf_chk.configure(state="disabled",
                                     text="Check IOD conformance (unavailable)")
-        self.conf_chk.pack(side="left")
-        ctk.CTkLabel(
-            valbar, text="Status:  ✓ valid   ✗ error "
-            "(bad value / empty-required / not-allowed)   "
-            "⚠ not in IOD (strict)   · n/a",
-            text_color=MUTED, font=ctk.CTkFont(size=11)).pack(side="left",
-                                                             padx=PAD)
+        self.conf_chk.pack(side="left", padx=(0, PAD))
+        ctk.CTkLabel(valbar, text="Show status:").pack(side="left")
+        self.status_vars = {}
+        for key in validity.CATEGORIES:
+            cb = ctk.CTkCheckBox(
+                valbar, width=20, command=self._render,
+                text=f"{validity.ICONS[key]} {validity.LABELS[key]}")
+            cb.select()
+            cb.pack(side="left", padx=4)
+            self.status_vars[key] = cb
 
     def _set_all_classes(self, on: bool) -> None:
         for v in self.class_vars.values():
@@ -132,6 +137,8 @@ class TagListPanel(ToolPanel):
         self.log.clear()
         self.search.delete(0, "end")
         for v in self.class_vars.values():
+            v.select()
+        for v in self.status_vars.values():
             v.select()
         self.match_lbl.configure(text="")
         self.path_lbl.configure(text="")
@@ -173,21 +180,15 @@ class TagListPanel(ToolPanel):
 
         run_threaded(self, work, done, err)
 
-    def _status_icon(self, row) -> str:
-        """Icon for a row: IOD conformance code (if checked) else VR validity."""
-        per_tag = self._conf[0]
-        tag_int = tagclass._TAG_RE.search(row.tag or "")
-        if tag_int:
-            key = int(tag_int.group(1), 16) << 16 | int(tag_int.group(2), 16)
-            code = per_tag.get(key)
-            if code == "TagUnexpected":
-                return "⚠"                      # warn
-            if code in ("TagEmpty", "TagNotAllowed", "EnumValueNotAllowed"):
-                return "✗"                      # error
-        if row.vr == "SQ":
-            return "·"
-        ok, _ = dicomtags.validate(row.vr, row.value)
-        return "✓" if ok else "✗"
+    def _row_status(self, row) -> str:
+        """Validity bucket (valid/error/warn/na) for a row - IOD conformance
+        code (when checked) overrides VR validity."""
+        code = None
+        m = tagclass._TAG_RE.search(row.tag or "")
+        if m:
+            key = int(m.group(1), 16) << 16 | int(m.group(2), 16)
+            code = self._conf[0].get(key)
+        return validity.status(row.vr, row.value, code)
 
     def _render(self) -> None:
         """Render the loaded tags, filtered by the search terms (all must match
@@ -195,6 +196,7 @@ class TagListPanel(ToolPanel):
         to the central log file (tag values may be PHI)."""
         terms = [t for t in self.search.get().lower().split() if t]
         sel = {c for c, v in self.class_vars.items() if v.get()}
+        sel_status = {k for k, v in self.status_vars.items() if v.get()}
         _per_tag, _missing, _note = self._conf
         header = []
         if self.conf_chk.get():
@@ -223,11 +225,13 @@ class TagListPanel(ToolPanel):
             cls = tagclass.classify_tag_str(r.tag)
             if cls not in sel:
                 continue
+            st = self._row_status(r)
+            if st not in sel_status:
+                continue
             hay = f"{r.tag} {r.vr} {r.keyword} {r.value} {cls}".lower()
             if all(t in hay for t in terms):
-                icon = self._status_icon(r)
-                lines.append(f"{icon:<3}{cls:<13}{r.tag:<24}{r.vr:<4}"
-                             f"{r.keyword:<28}{r.value}")
+                lines.append(f"{validity.ICONS[st]:<3}{cls:<13}{r.tag:<24}"
+                             f"{r.vr:<4}{r.keyword:<28}{r.value}")
                 shown += 1
         self.log.set_text("\n".join(lines))
         total = len(self._rows)

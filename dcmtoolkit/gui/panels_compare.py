@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from ..tools import compare, tagclass
+from ..tools import compare, tagclass, validity, conformance
 from .base import ToolPanel
 from .theme import MUTED
 from .widgets import run_threaded, PAD
@@ -37,7 +37,7 @@ class ComparePanel(ToolPanel):
         self._diff = []
         self._summ = {"a": None, "b": None}
         self.body.grid_columnconfigure(0, weight=1)
-        self.body.grid_rowconfigure(3, weight=1)
+        self.body.grid_rowconfigure(4, weight=1)
         self.log.grid_remove()
 
         top = ctk.CTkFrame(self.body)
@@ -101,13 +101,25 @@ class ComparePanel(ToolPanel):
                       command=lambda: self._set_all_classes(False)).pack(
             side="left", padx=2)
 
+        statusbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        statusbar.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(2, 0))
+        ctk.CTkLabel(statusbar, text="Status:").pack(side="left", padx=(0, PAD))
+        self.status_vars = {}
+        for key in validity.CATEGORIES:
+            cb = ctk.CTkCheckBox(
+                statusbar, width=20, command=self._render,
+                text=f"{validity.ICONS[key]} {validity.LABELS[key]}")
+            cb.select()
+            cb.pack(side="left", padx=4)
+            self.status_vars[key] = cb
+
         self.out = ctk.CTkTextbox(self.body, wrap="none",
                                   font=ctk.CTkFont(family="Consolas", size=12))
-        self.out.grid(row=3, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        self.out.grid(row=4, column=0, sticky="nsew", padx=PAD, pady=PAD)
         self.out.configure(state="disabled")
         self.summary = ctk.CTkLabel(self.body, text="", anchor="w",
                                     text_color=MUTED)
-        self.summary.grid(row=4, column=0, sticky="w", padx=PAD, pady=(0, PAD))
+        self.summary.grid(row=5, column=0, sticky="w", padx=PAD, pady=(0, PAD))
 
         self._mode_changed()
 
@@ -208,7 +220,16 @@ class ComparePanel(ToolPanel):
         self._set_out("Comparing...")
 
         def work():
-            return compare.diff_datasets(da, db), sa, sb
+            # IOD conformance on each side sharpens the per-row validity (so the
+            # "Not in IOD" filter works); best-effort - skip if unavailable.
+            ca = cb = {}
+            try:
+                if conformance.available():
+                    ca = conformance.conformance_issues(da)[0]
+                    cb = conformance.conformance_issues(db)[0]
+            except Exception:  # noqa: BLE001
+                ca = cb = {}
+            return compare.diff_datasets(da, db, conf_a=ca, conf_b=cb), sa, sb
 
         def done(result):
             self._diff, self._summ["a"], self._summ["b"] = result
@@ -226,9 +247,10 @@ class ComparePanel(ToolPanel):
             return
         only_diff = bool(self.only_diff.get())
         sel = {c for c, v in self.class_vars.items() if v.get()}
+        sel_status = {k for k, v in self.status_vars.items() if v.get()}
         terms = [t for t in self.search.get().lower().split() if t]
-        hdr = (f"{'Status':<7}{'Class':<13}{'Tag':<13}{'Keyword':<26}"
-               f"{'A':<36}{'B':<36}")
+        hdr = (f"{'V':<2}{'Status':<7}{'Class':<13}{'Tag':<13}{'Keyword':<26}"
+               f"{'A':<34}{'B':<34}")
         lines = [hdr, "-" * len(hdr)]
         counts = {"different": 0, "only_a": 0, "only_b": 0, "same": 0}
         for r in self._diff:
@@ -237,11 +259,14 @@ class ComparePanel(ToolPanel):
                 continue
             if r.cls not in sel:
                 continue
+            if r.validity not in sel_status:
+                continue
             hay = f"{r.tag} {r.keyword} {r.a} {r.b} {r.cls}".lower()
             if not all(t in hay for t in terms):
                 continue
-            lines.append(f"{_STATUS[r.status]:<7}{r.cls:<13}{r.tag:<13}"
-                         f"{r.keyword[:25]:<26}{r.a[:35]:<36}{r.b[:35]:<36}")
+            lines.append(f"{validity.ICONS[r.validity]:<2}"
+                         f"{_STATUS[r.status]:<7}{r.cls:<13}{r.tag:<13}"
+                         f"{r.keyword[:25]:<26}{r.a[:33]:<34}{r.b[:33]:<34}")
         self._set_out("\n".join(lines))
         sa, sb = self._summ["a"], self._summ["b"]
         self.summary.configure(
