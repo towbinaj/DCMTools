@@ -747,11 +747,15 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.rules_lbl.pack(side="left", padx=4)
         row("Profile", profbar)
 
+        basicbar = ctk.CTkFrame(form, fg_color="transparent")
         self.basic_profile = ctk.CTkCheckBox(
-            form, text="DICOM PS3.15 Basic Confidentiality Profile "
+            basicbar, text="DICOM PS3.15 Basic Confidentiality Profile "
             "(recommended)")
         self.basic_profile.select()   # safe default: actually de-identify
-        row("", self.basic_profile)
+        self.basic_profile.pack(side="left")
+        ctk.CTkButton(basicbar, text="What's in Basic?", width=120,
+                      command=self._explain_basic).pack(side="left", padx=PAD)
+        row("", basicbar)
         self.retain_dates = ctk.CTkCheckBox(
             form, text="   └ retain study dates (longitudinal)")
         row("", self.retain_dates)
@@ -843,6 +847,11 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.runner = BatchRunner(self, verb="written")
         self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
                                           padx=PAD, pady=(0, PAD))
+
+    def _explain_basic(self) -> None:
+        from .. import anon_profiles as ap
+        messagebox.showinfo("PS3.15 Basic Confidentiality Profile",
+                            ap.BASIC_PROFILE_EXPLANATION, parent=self)
 
     def _toggle_send(self) -> None:
         if self.send_after.get():

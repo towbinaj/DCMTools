@@ -155,26 +155,8 @@ class AnonProfileDialog(ctk.CTkToplevel):
         self._load_into_editor(start)
 
     def _explain_basic(self) -> None:
-        messagebox.showinfo(
-            "PS3.15 Basic Confidentiality Profile",
-            "REMOVED or EMPTIED:\n"
-            "  - Patient Name and other names\n"
-            "  - Patient ID and other patient IDs\n"
-            "  - Birth date and other patient dates\n"
-            "  - Addresses, phone numbers, comments\n"
-            "  - Institution name / address / department; station & device IDs\n"
-            "  - Referring / performing / operator physician names\n"
-            "  - Study and series dates & times (unless 'Retain study dates')\n"
-            "  - All private tags\n"
-            "  - UIDs (re-mapped consistently across the batch)\n\n"
-            "KEPT:\n"
-            "  - Patient age and sex\n"
-            "  - Image / pixel data\n"
-            "  - Standard non-identifying tags (e.g. technical / acquisition)\n\n"
-            "It also stamps the de-identification markers "
-            "(PatientIdentityRemoved=YES, code 113100).\n\n"
-            "Note: it does NOT remove burned-in pixel text.",
-            parent=self)
+        messagebox.showinfo("PS3.15 Basic Confidentiality Profile",
+                            ap.BASIC_PROFILE_EXPLANATION, parent=self)
 
     # -- helpers ---------------------------------------------------------
     def _names(self) -> list[str]:
