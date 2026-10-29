@@ -14,6 +14,7 @@ unguessable token - the server never maps URLs onto arbitrary disk paths.
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import mimetypes
 import os
@@ -23,7 +24,7 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -181,17 +182,27 @@ def _frames(ds: Dataset) -> int:
         return 1
 
 
-def _sort_key(obj: tuple[dict, str, int]):
-    meta, base, _ = obj
+def _instance_number(meta: dict) -> int:
     try:
-        n = int(meta.get("InstanceNumber"))
+        return int(meta.get("InstanceNumber"))
     except (TypeError, ValueError):
-        n = 10**9
-    return (n, meta.get("SOPInstanceUID", ""), base)
+        return 10**9
 
 
-def _entries(meta: dict, base: str, nf: int) -> list[dict]:
-    """Manifest entries for one object: one per frame for multi-frame.
+@dataclass
+class _Obj:
+    """One DICOM object, its header already serialised (dicts are dropped
+    straight away - holding 14k parsed headers as Python objects cost
+    hundreds of MB)."""
+    sort_key: tuple
+    sop: str
+    meta_json: str
+    base: str
+    frames: int
+
+
+def _entries_json(o: _Obj):
+    """Manifest entries for one object (JSON text): one per frame.
 
     OHIF keeps only the first entry per SOPInstanceUID as the instance and
     uses the rest just for their per-frame URL, so only the first carries the
@@ -200,26 +211,51 @@ def _entries(meta: dict, base: str, nf: int) -> list[dict]:
     functional groups grow with the frame count (gigabytes at a few thousand
     frames).
     """
-    if nf == 1:
-        return [{"metadata": meta, "url": base}]
-    stub = {"SOPInstanceUID": meta["SOPInstanceUID"]}
-    return [{"metadata": meta if fr == 1 else stub,
-             "url": f"{base}?frame={fr}"} for fr in range(1, nf + 1)]
+    if o.frames == 1:
+        yield f'{{"metadata":{o.meta_json},"url":{json.dumps(o.base)}}}'
+        return
+    stub = json.dumps({"SOPInstanceUID": o.sop})
+    for fr in range(1, o.frames + 1):
+        meta = o.meta_json if fr == 1 else stub
+        yield f'{{"metadata":{meta},"url":{json.dumps(f"{o.base}?frame={fr}")}}}'
 
 
 @dataclass
 class Manifest:
-    data: dict
+    studies: list[dict]          # summaries; each series has "objects"
     files: dict[str, Path] = field(default_factory=dict)   # token -> file
     skipped: int = 0
 
     @property
     def study_uids(self) -> list[str]:
-        return [s["StudyInstanceUID"] for s in self.data["studies"]]
+        return [s["StudyInstanceUID"] for s in self.studies]
 
     @property
     def instance_count(self) -> int:
         return len(self.files)
+
+    def chunks(self):
+        """The dicomjson manifest as a stream of JSON text pieces."""
+        yield '{"studies":['
+        for i, st in enumerate(self.studies):
+            head = {k: v for k, v in st.items() if k != "series"}
+            yield ("," if i else "") + json.dumps(head)[:-1] + ',"series":['
+            for j, se in enumerate(st["series"]):
+                head = {k: v for k, v in se.items() if k != "objects"}
+                yield ("," if j else "") + json.dumps(head)[:-1] + ',"instances":['
+                first = True
+                for o in se["objects"]:
+                    for e in _entries_json(o):
+                        yield e if first else "," + e
+                        first = False
+                yield "]}"
+            yield "]}"
+        yield "]}"
+
+    @property
+    def data(self) -> dict:
+        """Parsed manifest (for tests/inspection - prepare() streams)."""
+        return json.loads("".join(self.chunks()))
 
 
 def build_manifest(files: Iterable[Path], file_url) -> Manifest:
@@ -228,12 +264,11 @@ def build_manifest(files: Iterable[Path], file_url) -> Manifest:
     ``file_url(token)`` returns the absolute http URL the token is served at.
     Multi-frame objects get one entry per frame (``?frame=N``, 1-based), which
     is how OHIF's dicomjson source addresses individual frames; only the first
-    carries the header (see ``_entries``).
+    carries the header (see ``_entries_json``).
     Non-DICOM / pixel-less files are skipped (counted in ``skipped``).
     """
     studies: dict[str, dict] = {}
     series: dict[tuple[str, str], dict] = {}
-    instances = defaultdict(list)
     tokens: dict[str, Path] = {}
     skipped = 0
 
@@ -273,26 +308,27 @@ def build_manifest(files: Iterable[Path], file_url) -> Manifest:
                 "SeriesDate": meta.get("SeriesDate", ""),
                 "SeriesTime": meta.get("SeriesTime", ""),
                 "Modality": meta.get("Modality", ""),
-                "instances": [],
+                "objects": [],
             }
             series[(st, se)] = s
             studies[st]["series"].append(s)
         token = secrets.token_urlsafe(16)
         tokens[token] = f
-        instances[(st, se)].append(
-            (meta, "dicomweb:" + file_url(token), _frames(ds)))
+        base = "dicomweb:" + file_url(token)
+        series[(st, se)]["objects"].append(_Obj(
+            (_instance_number(meta), sop, base), sop,
+            json.dumps(meta, separators=(",", ":")), base, _frames(ds)))
 
-    for key, s in series.items():
-        s["instances"] = [e for obj in sorted(instances[key], key=_sort_key)
-                          for e in _entries(*obj)]
+    for s in series.values():
+        s["objects"].sort(key=lambda o: o.sort_key)
     for st in studies.values():
         st["series"].sort(key=lambda s: (
             s["SeriesNumber"] if isinstance(s["SeriesNumber"], int) else 10**9))
         mods = sorted({s["Modality"] for s in st["series"] if s["Modality"]})
         st["Modalities"] = "\\".join(mods)
-        st["NumInstances"] = len({i["metadata"]["SOPInstanceUID"]
-                                  for s in st["series"] for i in s["instances"]})
-    return Manifest({"studies": list(studies.values())}, tokens, skipped)
+        st["NumInstances"] = len({o.sop for s in st["series"]
+                                  for o in s["objects"]})
+    return Manifest(list(studies.values()), tokens, skipped)
 
 
 # -- local server --------------------------------------------------------
@@ -421,18 +457,26 @@ def shutdown() -> None:
             _server = None
 
 
+def _gzip_chunks(chunks) -> bytes:
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
+        for c in chunks:
+            gz.write(c.encode())
+    return buf.getvalue()
+
+
 def prepare(files: Iterable[Path]) -> tuple[str, Manifest]:
     """Register ``files`` with the local server; return (viewer URL, manifest)."""
     srv = server()
     m = build_manifest(files, lambda t: f"{srv.base_url}/dcmtk/file/{t}")
-    if not m.data["studies"]:
+    if not m.studies:
         raise ValueError("No displayable DICOM images found.")
     mid = secrets.token_urlsafe(12)
     with _lock:
         srv.files.update(m.files)
         # Kept gzipped (~10x smaller; headers are repetitive): a 14k-object
         # load is tens of MB of JSON and up to MAX_OPENS of them are kept.
-        srv.manifests[mid] = gzip.compress(json.dumps(m.data).encode(), 6)
+        srv.manifests[mid] = _gzip_chunks(m.chunks())
         srv.opens.append((mid, list(m.files)))
         while len(srv.opens) > MAX_OPENS:
             old_mid, old_tokens = srv.opens.popleft()
