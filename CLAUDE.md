@@ -11,7 +11,7 @@ PyInstaller. One app, many tabs (Echo, Send, Query/Move, Retrieve, Store
 Receiver, Modality SCU, Tag Lister, Tag Compare, Preview, Modify, Split,
 Enhanced→Classic, Folder Dump, De-identify, QA, HL7 Sender). Runs fully offline;
 the only network calls it makes on its own are HTTPS GETs to GitHub for
-self-update.
+self-update. (The OHIF viewer's web server listens on 127.0.0.1 only.)
 
 ## Security & privacy — non-negotiable
 - **The GitHub repo is public and must stay secret-free.** Never commit real AE
@@ -35,6 +35,7 @@ self-update.
 ```
 py -3 -m venv .venv
 .venv\Scripts\pip install -r requirements.txt -r requirements-dev.txt
+.venv\Scripts\python scripts\fetch_ohif.py  # OHIF viewer build (once / on version bump)
 .venv\Scripts\python main.py            # run from source
 .venv\Scripts\python -m pytest          # tests (keep them green before committing)
 .venv\Scripts\pyinstaller DICOMToolkit.spec --noconfirm --clean   # build the exe
@@ -59,17 +60,25 @@ hooks or signing unless asked.
 ## Architecture notes
 - `dcmtoolkit/`: `net/` (scu/scp/mwl/mpps/selftest), `store/processing.py`
   (anonymize/morph/pixel/dates engine), `tools/` (fileops, qa, conformance,
-  render, enhanced, compare, tagclass, validity, dicomtags), `hl7/` (mllp +
+  render, enhanced, compare, tagclass, validity, dicomtags, ohif), `hl7/` (mllp +
   message), `gui/` (`app.py` + `panels_*.py`), `support.py`, `updater.py`.
 - GUI: panels are built lazily and switched with `tkraise` (z-order), never
   rebuilt or background-prewarmed — prewarming made it much slower.
 - Destinations are `Node`s grouped PACS/Storage · Worklist/MPPS · HL7/MLLP;
   each tool's picker filters by group. HL7 endpoints need no AE title.
 - Packaging is **onefile** by design (one portable .exe). That makes launch and
-  close slow (it extracts ~90 MB to %TEMP% each run and deletes it on exit) —
+  close slow (it extracts ~90 MB, plus ~50 MB of OHIF, to %TEMP% each run and deletes it on exit) —
   this is accepted; `onedir` is the fix if ever revisited.
-- Bundled offline: the DICOM standard JSON (IOD conformance) and the
-  JPEG/JPEG2000/JPEG-LS decoders.
+- Bundled offline: the DICOM standard JSON (IOD conformance), the
+  JPEG/JPEG2000/JPEG-LS decoders, and the OHIF viewer build
+  (`assets/ohif-viewer/`, ~50 MB, git-ignored; fetched pinned + SHA-512-checked
+  by `scripts/fetch_ohif.py`, which CI runs before PyInstaller).
+- OHIF viewer (`tools/ohif.py`): a 127.0.0.1-only HTTP server serves the OHIF
+  build plus only the files registered for an "Open in OHIF" request (random
+  per-file tokens), and a `dicomjson` manifest built from the headers replaces
+  any DICOMweb backend. Memory matters here: headers are serialised per object
+  and the manifest is streamed into gzip; multi-frame frames 2..N carry only
+  the SOP UID (repeating the header per frame was quadratic).
 
 ## When adding GUI features
 - Keep heavy work off the UI thread via `widgets.run_threaded`.

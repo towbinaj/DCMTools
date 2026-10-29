@@ -12,6 +12,11 @@ for _root, _dirs, _files in os.walk(os.path.join("assets", "dicom-standard")):
     for _f in _files:
         _src = os.path.join(_root, _f)
         datas.append((_src, _root))
+# OHIF viewer build (fetched by scripts/fetch_ohif.py; not in git). Optional:
+# without it the Preview tab's "Open in OHIF viewer" explains how to add it.
+for _root, _dirs, _files in os.walk(os.path.join("assets", "ohif-viewer")):
+    for _f in _files:
+        datas.append((os.path.join(_root, _f), _root))
 binaries = []
 hiddenimports = []
 

@@ -27,6 +27,8 @@ __pycache__/
 
 build/
 dist/
+# OHIF viewer build - fetched by scripts/fetch_ohif.py (pinned + hash-checked)
+assets/ohif-viewer/
 *.manifest
 *.spec.bak
 
