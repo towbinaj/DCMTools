@@ -178,3 +178,29 @@ def test_old_opens_are_forgotten(tmp_path, monkeypatch):
         _get(parse_qs(urlsplit(urls[-1]).query)["url"][0])
     finally:
         ohif.shutdown()
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("LINEAR", ["LINEAR"]),          # loader reads [0]: must be a list
+    (["LINEAR", "LINEAR"], ["LINEAR"]),
+    ("sigmoid", ["SIGMOID"]),
+    ("LINEAR_EXACT", ["LINEAR_EXACT"]),
+    ("VENDOR_CURVE", None),
+])
+def test_voi_lut_function_is_sanitised(tmp_path, raw, expected):
+    p, _ = _write(tmp_path, "v.dcm", extra={"VOILUTFunction": raw})
+    meta = ohif.build_manifest([p], _url).data["studies"][0]["series"][0][
+        "instances"][0]["metadata"]
+    assert meta.get("VOILUTFunction") == expected
+
+
+def test_cancelled_download_is_not_reported(capsys):
+    srv = ohif.server()
+    try:
+        try:
+            raise ConnectionResetError(10054, "reset by peer")
+        except ConnectionResetError:
+            srv.handle_error(None, ("127.0.0.1", 1))
+        assert capsys.readouterr().err == ""
+    finally:
+        ohif.shutdown()

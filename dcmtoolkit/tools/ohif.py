@@ -19,6 +19,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 import webbrowser
 from collections import defaultdict, deque
@@ -70,6 +71,9 @@ window.config = {
   investigationalUseDialog: { option: 'never' },
   maxNumRequests: { interaction: 100, thumbnail: 5, prefetch: 25 },
   showErrorDetails: 'always',
+  // OHIF calls this for every failed image load; without it OHIF's own
+  // handler throws 'handler is not a function' and hides the real error.
+  httpErrorHandler: error => console.warn('Image load failed:', error),
   defaultDataSourceName: 'dicomjson',
   dataSources: [
     {
@@ -143,6 +147,30 @@ def naturalize(ds: Dataset) -> dict:
         if v is not None:
             out[elem.keyword] = v
     return out
+
+
+_VOI_FUNCTIONS = {"LINEAR", "LINEAR_EXACT", "SIGMOID"}
+
+
+def _fix_voi_function(meta: dict) -> None:
+    """Send VOILUTFunction the way Cornerstone reads it, or drop it.
+
+    The image loader takes ``voiLUTFunction[0]``, so a plain string "LINEAR"
+    became "L" and every such image failed with 'Invalid VOI LUT function'.
+    Always send a one-item list holding exactly LINEAR / LINEAR_EXACT /
+    SIGMOID (first value, case-folded); drop anything else - missing means
+    LINEAR, the DICOM default.
+    """
+    v = meta.get("VOILUTFunction")
+    if v is None:
+        return
+    if isinstance(v, list):
+        v = v[0] if v else ""
+    v = str(v).strip().upper()
+    if v in _VOI_FUNCTIONS:
+        meta["VOILUTFunction"] = [v]
+    else:
+        del meta["VOILUTFunction"]
 
 
 def _frames(ds: Dataset) -> int:
@@ -222,6 +250,7 @@ def build_manifest(files: Iterable[Path], file_url) -> Manifest:
             skipped += 1    # OHIF can't place or draw it (e.g. SR, DICOMDIR)
             continue
         meta = naturalize(ds)
+        _fix_voi_function(meta)
         if st not in studies:
             studies[st] = {
                 "StudyInstanceUID": st,
@@ -340,6 +369,15 @@ class _ViewerHTTPServer(ThreadingHTTPServer):
         self.manifests: dict[str, bytes] = {}
         self.files: dict[str, Path] = {}
         self.opens: deque[tuple[str, list[str]]] = deque()  # (mid, tokens)
+
+    def handle_error(self, request, client_address) -> None:
+        # The viewer routinely cancels image downloads it no longer needs
+        # (scrolled past, window closed); that is not an error. Anything else
+        # goes to the app log rather than stderr, which a windowed exe lacks.
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionError, TimeoutError)):
+            return
+        _log.warning("OHIF viewer server error", exc_info=True)
 
     @property
     def base_url(self) -> str:
