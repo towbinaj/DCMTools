@@ -128,14 +128,23 @@ class PreviewPanel(ToolPanel):
         self._roots = []
         self.ohif_btn.configure(state="disabled")
         self._cache.clear()
-        self._img_ref = None
         self._idx = 0
         self.slider.pack_forget()
         self.pos_lbl.configure(text="")
         self.info.configure(text="No image loaded.", text_color=MUTED)
-        self.image_lbl.configure(
-            image=None,
-            text="↓   Drop a DICOM file or a series folder here")
+        self._blank_image("↓   Drop a DICOM file or a series folder here")
+
+    def _blank_image(self, text: str) -> None:
+        """Remove the shown image and set placeholder text.
+
+        CTkLabel's configure(image=None) leaves the old photo on the inner Tk
+        label; once that photo is garbage-collected every later configure on
+        the label fails with 'image "pyimageN" doesn't exist' (seen when
+        dragging a new study in after Clear). Detach it from the Tk label too.
+        """
+        self.image_lbl.configure(image=None, text=text)
+        self.image_lbl._label.configure(image="")
+        self._img_ref = None
 
     def _load_series(self, roots: list[Path], single: bool = False) -> None:
         self.info.configure(text="Scanning …", text_color=MUTED)
@@ -199,7 +208,7 @@ class PreviewPanel(ToolPanel):
         def err(exc, tb):
             self._views = []
             self.info.configure(text=f"[ERROR] {exc}", text_color="#d9695f")
-            self.image_lbl.configure(image=None, text="")
+            self._blank_image("")
 
         run_threaded(self, work, done, err)
 
@@ -304,7 +313,6 @@ class PreviewPanel(ToolPanel):
             self.pos_lbl.configure(text=f"{pos}   ·   {w}×{h}   ·   {pm}")
 
         def err(exc, tb):
-            self._img_ref = None
-            self.image_lbl.configure(image=None, text=f"Cannot render: {exc}")
+            self._blank_image(f"Cannot render: {exc}")
 
         run_threaded(self, work, done, err)
