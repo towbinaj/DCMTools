@@ -163,3 +163,18 @@ def test_prepare_rejects_no_images(tmp_path, monkeypatch):
             ohif.prepare([tmp_path / "x.txt"])
     finally:
         ohif.shutdown()
+
+
+def test_old_opens_are_forgotten(tmp_path, monkeypatch):
+    monkeypatch.setattr(ohif, "MAX_OPENS", 2)
+    f, _ = _write(tmp_path, "a.dcm")
+    try:
+        urls = [ohif.prepare([f])[0] for _ in range(3)]
+        srv = ohif.server()
+        assert len(srv.manifests) == 2 and len(srv.files) == 2
+        first = parse_qs(urlsplit(urls[0]).query)["url"][0]
+        with pytest.raises(urllib.error.HTTPError):
+            _get(first)
+        _get(parse_qs(urlsplit(urls[-1]).query)["url"][0])
+    finally:
+        ohif.shutdown()

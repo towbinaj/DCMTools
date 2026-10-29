@@ -21,7 +21,7 @@ import shutil
 import subprocess
 import threading
 import webbrowser
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -58,6 +58,10 @@ window.config = {
   customizationService: {},
   showStudyList: false,
   maxNumberOfWebWorkers: 3,
+  // Decoded-pixel cache per viewer window (OHIF default 3 GB). Each Open
+  // makes a new window, so several open at once would add up; 1 GB still
+  // holds ~2000 512x512 CT slices and evicts least-recently-used beyond that.
+  maxCacheSize: 1073741824,
   showWarningMessageForCrossOrigin: false,
   showCPUFallbackMessage: true,
   showLoadingIndicator: true,
@@ -335,11 +339,17 @@ class _ViewerHTTPServer(ThreadingHTTPServer):
         super().__init__(("127.0.0.1", 0), _Handler)
         self.manifests: dict[str, bytes] = {}
         self.files: dict[str, Path] = {}
+        self.opens: deque[tuple[str, list[str]]] = deque()  # (mid, tokens)
 
     @property
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.server_address[1]}"
 
+
+#: How many recent "Open in OHIF" requests stay servable. Older ones are
+#: forgotten so the app's memory doesn't grow over a long session; a viewer
+#: window that old just can't fetch images it hadn't loaded yet.
+MAX_OPENS = 10
 
 _server: _ViewerHTTPServer | None = None
 _lock = threading.Lock()
@@ -377,8 +387,15 @@ def prepare(files: Iterable[Path]) -> tuple[str, Manifest]:
     if not m.data["studies"]:
         raise ValueError("No displayable DICOM images found.")
     mid = secrets.token_urlsafe(12)
-    srv.files.update(m.files)
-    srv.manifests[mid] = json.dumps(m.data).encode()
+    with _lock:
+        srv.files.update(m.files)
+        srv.manifests[mid] = json.dumps(m.data).encode()
+        srv.opens.append((mid, list(m.files)))
+        while len(srv.opens) > MAX_OPENS:
+            old_mid, old_tokens = srv.opens.popleft()
+            srv.manifests.pop(old_mid, None)
+            for t in old_tokens:
+                srv.files.pop(t, None)
     manifest_url = f"{srv.base_url}/dcmtk/manifest/{mid}.json"
     url = (f"{srv.base_url}/viewer/dicomjson?url={quote(manifest_url, safe='')}"
            f"&StudyInstanceUIDs={quote(','.join(m.study_uids), safe='')}")
