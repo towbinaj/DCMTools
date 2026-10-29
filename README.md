@@ -34,7 +34,7 @@ initiate to destinations *you* configure.
 | **Storage Commit** | Ask an archive to confirm it stored specific objects (N-ACTION + N-EVENT-REPORT). |
 | **Patient / Study / Series Info** | Edit demographics across a loaded study in labelled fields, with live DICOM VR validation. |
 | **Enhanced → Classic** | Convert Enhanced CT/MR/PET multi-frame objects to classic single-frame DICOM (functional groups flattened). |
-| **Preview** | Render an object's pixels to a thumbnail (grayscale/color, multi-frame) for a visual spot-check. |
+| **Preview** | Render an object's pixels to a thumbnail (grayscale/color, multi-frame) for a visual spot-check. **Open in OHIF viewer** shows everything loaded in the bundled [OHIF](https://ohif.org/) viewer (see below). |
 | **Compare** | Diff the DICOM tags of two images, two series, or two studies (representative instance per side): see different / A-only / B-only / same, filter to differences, by tag class, or by text, and export CSV. |
 | **QA / Consistency** | Scan a folder for problems (see below). |
 | **De-identify Files** | DICOM PS3.15 Basic Profile + the receiver's anonymize/morph/pixel-blank engine. |
@@ -97,6 +97,27 @@ The **Tag Lister** shows a per-tag status icon: **✓** valid · **✗** error (
 value, empty-required, or not-allowed) · **⚠** present but not in the IOD
 (`TagUnexpected`) · **·** not evaluated. Tick **Check IOD conformance** to drive
 the icons from the codes above and list any missing required tags.
+
+## OHIF viewer
+
+The **Preview** tab's **Open in OHIF viewer** button opens everything you
+loaded (every series and study in the file, folder or zip, not just the series
+previewed) in [OHIF](https://ohif.org/), a full web DICOM viewer with
+window/level, measurements, MPR and multi-series layouts. No PACS or DICOMweb
+server is involved:
+
+- The OHIF production build (MIT licence) is bundled in the exe.
+- A small web server inside the app, bound to `127.0.0.1` only, serves OHIF and
+  the files you loaded. Each file sits behind a random token, so only those
+  files are reachable.
+- The app builds an OHIF `dicomjson` manifest from the DICOM headers, so OHIF
+  gets the study, series and instance metadata without a backend.
+- The viewer opens in a chrome-less Edge (or Chrome) `--app` window using its
+  own profile under the data folder, or in the default browser if neither is
+  installed.
+
+OHIF's AI-segmentation runtime and whole-slide microscopy mode are left out of
+the bundle to keep the exe small.
 
 ## De-identification
 
@@ -219,7 +240,8 @@ Everything runs on the machine. The DICOM standard used by the conformance
 check (parsed to ~2.5 MB of JSON) and the compressed-pixel decoders
 (JPEG/JPEG2000/JPEG-LS) are **bundled in the exe** — nothing is downloaded at
 runtime, and no image data is ever transmitted except the DICOM associations you
-start to destinations you configure.
+start to destinations you configure. The OHIF viewer is bundled too and
+talks only to the app's own `127.0.0.1` server.
 
 ## Reporting bugs
 
@@ -246,11 +268,17 @@ manually. The reporter always reviews the email before sending.
 ## Building the exe
 
 ```
+.venv\Scripts\python scripts\fetch_ohif.py
 .venv\Scripts\pyinstaller DICOMToolkit.spec --noconfirm --clean
 ```
 
-Produces `dist\DICOMToolkit.exe` (~40 MB, single file; includes the bundled
-DICOM standard + pixel decoders).
+`fetch_ohif.py` downloads the pinned OHIF build (`@ohif/app` on npm,
+SHA-512-checked) into `assets/ohif-viewer/`. That folder is not in git. The
+release workflow runs the script before building. The exe still builds without
+it; the OHIF button then explains how to add it.
+
+Produces `dist\DICOMToolkit.exe` (single file; includes the bundled DICOM
+standard + pixel decoders, ~40 MB, plus the OHIF viewer, ~50 MB uncompressed).
 
 ## Updates (self-update)
 
@@ -312,10 +340,12 @@ dcmtoolkit/
             mwl.py (worklist), mpps.py, selftest.py (C-STORE send-ability)
   store/    naming.py (folder formats), processing.py (anon/morph/PS3.15/pixel)
   tools/    fileops.py, dicomtags.py, qa.py, conformance.py, render.py,
-            enhanced.py (Enhanced→Classic), modality.py (exam stamping)
+            enhanced.py (Enhanced→Classic), modality.py (exam stamping),
+            ohif.py (local OHIF viewer server + dicomjson manifest)
   gui/      app.py + panels_*.py
   service.py
 assets/dicom-standard/   bundled DICOM standard JSON (conformance)
+assets/ohif-viewer/      OHIF build (fetched by scripts/fetch_ohif.py, not in git)
 tests/                   pytest suite
 main.py                  entry point
 DICOMToolkit.spec        PyInstaller build

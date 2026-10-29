@@ -2,18 +2,19 @@
 spot-check (grayscale or color). Scrubs a whole series - every instance (and
 every frame of multi-frame instances) on one slider - fully offline via the
 bundled decoders. Useful for ophthalmic OP/OPT where web viewers are
-unreliable."""
+unreliable. "Open in OHIF" hands the loaded files to the bundled OHIF viewer
+for full diagnostic-style viewing (W/L, measurements, MPR), still offline."""
 
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 from pydicom import dcmread
 
-from ..tools import render
+from ..tools import ohif, render
 from ..tools.fileops import expand_sources
 from .base import ToolPanel
 from .theme import MUTED
@@ -32,6 +33,7 @@ class PreviewPanel(ToolPanel):
         # A "view" is one (file, frame) pair; the slider scrubs across all
         # views of the loaded series in order.
         self._views: list[tuple[Path, int]] = []
+        self._roots: list[Path] = []     # what was opened, for OHIF
         self._cache: "OrderedDict[Path, object]" = OrderedDict()
         self._img_ref = None
         self._idx = 0
@@ -51,6 +53,10 @@ class PreviewPanel(ToolPanel):
                       command=self._open_folder).pack(side="left", padx=PAD)
         ctk.CTkButton(bar, text="Clear", width=70, command=self._clear).pack(
             side="right")
+        self.ohif_btn = ctk.CTkButton(bar, text="Open in OHIF viewer",
+                                      command=self._open_ohif,
+                                      state="disabled")
+        self.ohif_btn.pack(side="right", padx=PAD)
 
         self.info = ctk.CTkLabel(self.body, text="No image loaded.", anchor="w",
                                  text_color=MUTED, justify="left")
@@ -119,6 +125,8 @@ class PreviewPanel(ToolPanel):
     def _clear(self) -> None:
         """Reset back to the empty drop-zone state."""
         self._views = []
+        self._roots = []
+        self.ohif_btn.configure(state="disabled")
         self._cache.clear()
         self._img_ref = None
         self._idx = 0
@@ -169,6 +177,8 @@ class PreviewPanel(ToolPanel):
         def done(result):
             views, ngroups, ninst, meta = result
             self._views = views
+            self._roots = roots
+            self.ohif_btn.configure(state="normal")
             n = len(views)
             if n > 1:
                 self.slider.configure(to=n - 1, number_of_steps=n - 1)
@@ -190,6 +200,39 @@ class PreviewPanel(ToolPanel):
             self._views = []
             self.info.configure(text=f"[ERROR] {exc}", text_color="#d9695f")
             self.image_lbl.configure(image=None, text="")
+
+        run_threaded(self, work, done, err)
+
+    def _open_ohif(self) -> None:
+        """Show everything that was opened (all series, not just the one
+        previewed here) in the bundled OHIF viewer."""
+        if not ohif.available():
+            messagebox.showinfo(
+                "OHIF viewer",
+                "The OHIF viewer is not bundled with this build.\n\n"
+                "Developers: run  python scripts/fetch_ohif.py", parent=self)
+            return
+        roots = self._roots
+        if not roots:
+            return
+        single = len(roots) == 1 and roots[0].is_file()
+        self.ohif_btn.configure(state="disabled", text="Opening OHIF …")
+
+        def work():
+            files = roots if single else expand_sources(roots)
+            return ohif.prepare(files)
+
+        def done(result):
+            url, m = result
+            self.ohif_btn.configure(state="normal", text="Open in OHIF viewer")
+            ohif.open_window(url)
+            self.log.write(f"OHIF: {m.instance_count} object(s) in "
+                           f"{len(m.study_uids)} study(ies)"
+                           + (f", {m.skipped} skipped" if m.skipped else ""))
+
+        def err(exc, tb):
+            self.ohif_btn.configure(state="normal", text="Open in OHIF viewer")
+            messagebox.showerror("OHIF viewer", str(exc), parent=self)
 
         run_threaded(self, work, done, err)
 
