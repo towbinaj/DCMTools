@@ -52,11 +52,37 @@ def test_manifest_groups_sorts_and_naturalizes(tmp_path):
 
 
 def test_multiframe_gets_one_entry_per_frame(tmp_path):
-    p, _ = _write(tmp_path, "mf.dcm", extra={"NumberOfFrames": 3})
+    p, ds = _write(tmp_path, "mf.dcm", extra={"NumberOfFrames": 12})
     m = ohif.build_manifest([p], _url)
     insts = m.data["studies"][0]["series"][0]["instances"]
-    assert [i["url"].rsplit("=", 1)[-1] for i in insts] == ["1", "2", "3"]
+    # Numeric frame order (frame 10 must not sort before frame 2).
+    assert [i["url"].rsplit("=", 1)[-1] for i in insts] == [
+        str(n) for n in range(1, 13)]
     assert m.data["studies"][0]["NumInstances"] == 1
+    # Only frame 1 carries the header; the rest are UID stubs.
+    assert insts[0]["metadata"]["Rows"] == 4
+    assert all(i["metadata"] == {"SOPInstanceUID": ds.SOPInstanceUID}
+               for i in insts[1:])
+
+
+def test_manifest_size_is_linear_in_frames(tmp_path):
+    """Per-frame functional groups grow with frames; the header must not be
+    repeated per frame (that was quadratic and exhausted memory)."""
+    from pydicom.dataset import Dataset
+
+    def size(n):
+        groups = []
+        for i in range(n):
+            pos = Dataset()
+            pos.ImagePositionPatient = [0, 0, float(i)]
+            g = Dataset()
+            g.PlanePositionSequence = [pos]
+            groups.append(g)
+        p, _ = _write(tmp_path, f"e{n}.dcm", extra={
+            "NumberOfFrames": n, "PerFrameFunctionalGroupsSequence": groups})
+        return len(json.dumps(ohif.build_manifest([p], _url).data))
+
+    assert size(800) < 5 * size(200)
 
 
 def test_private_and_sequences(tmp_path):

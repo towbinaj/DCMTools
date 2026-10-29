@@ -148,12 +148,30 @@ def _frames(ds: Dataset) -> int:
         return 1
 
 
-def _sort_key(inst: dict):
+def _sort_key(obj: tuple[dict, str, int]):
+    meta, base, _ = obj
     try:
-        n = int(inst["metadata"].get("InstanceNumber"))
+        n = int(meta.get("InstanceNumber"))
     except (TypeError, ValueError):
         n = 10**9
-    return (n, inst["metadata"].get("SOPInstanceUID", ""), inst["url"])
+    return (n, meta.get("SOPInstanceUID", ""), base)
+
+
+def _entries(meta: dict, base: str, nf: int) -> list[dict]:
+    """Manifest entries for one object: one per frame for multi-frame.
+
+    OHIF keeps only the first entry per SOPInstanceUID as the instance and
+    uses the rest just for their per-frame URL, so only the first carries the
+    full header. Repeating it per frame made the manifest grow with
+    frames x header size - quadratic for enhanced objects, whose per-frame
+    functional groups grow with the frame count (gigabytes at a few thousand
+    frames).
+    """
+    if nf == 1:
+        return [{"metadata": meta, "url": base}]
+    stub = {"SOPInstanceUID": meta["SOPInstanceUID"]}
+    return [{"metadata": meta if fr == 1 else stub,
+             "url": f"{base}?frame={fr}"} for fr in range(1, nf + 1)]
 
 
 @dataclass
@@ -176,7 +194,8 @@ def build_manifest(files: Iterable[Path], file_url) -> Manifest:
 
     ``file_url(token)`` returns the absolute http URL the token is served at.
     Multi-frame objects get one entry per frame (``?frame=N``, 1-based), which
-    is how OHIF's dicomjson source addresses individual frames.
+    is how OHIF's dicomjson source addresses individual frames; only the first
+    carries the header (see ``_entries``).
     Non-DICOM / pixel-less files are skipped (counted in ``skipped``).
     """
     studies: dict[str, dict] = {}
@@ -226,14 +245,12 @@ def build_manifest(files: Iterable[Path], file_url) -> Manifest:
             studies[st]["series"].append(s)
         token = secrets.token_urlsafe(16)
         tokens[token] = f
-        base = "dicomweb:" + file_url(token)
-        nf = _frames(ds)
-        for fr in range(1, nf + 1):
-            url = base if nf == 1 else f"{base}?frame={fr}"
-            instances[(st, se)].append({"metadata": meta, "url": url})
+        instances[(st, se)].append(
+            (meta, "dicomweb:" + file_url(token), _frames(ds)))
 
     for key, s in series.items():
-        s["instances"] = sorted(instances[key], key=_sort_key)
+        s["instances"] = [e for obj in sorted(instances[key], key=_sort_key)
+                          for e in _entries(*obj)]
     for st in studies.values():
         st["series"].sort(key=lambda s: (
             s["SeriesNumber"] if isinstance(s["SeriesNumber"], int) else 10**9))
@@ -289,11 +306,19 @@ class _Handler(SimpleHTTPRequestHandler):
             f = srv.files.get(path.rsplit("/", 1)[-1])
             if f is None:
                 return self.send_error(404)
+            # Stream rather than read_bytes(): objects can be gigabytes.
             try:
-                body = f.read_bytes()
+                fh = open(f, "rb")
             except OSError:
                 return self.send_error(404)
-            return self._send_bytes(body, "application/dicom")
+            with fh:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/dicom")
+                self.send_header("Content-Length",
+                                 str(os.fstat(fh.fileno()).st_size))
+                self.end_headers()
+                shutil.copyfileobj(fh, self.wfile, 1 << 20)
+            return None
         # OHIF is a single-page app: client-side routes (e.g. /viewer/dicomjson)
         # have no file behind them and must get index.html.
         root = self.server_root().resolve()
