@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import urllib.error
 import urllib.request
@@ -116,7 +117,10 @@ def served(tmp_path, monkeypatch):
 
 def _get(url):
     with urllib.request.urlopen(url, timeout=5) as r:
-        return r.status, r.headers, r.read()
+        body = r.read()
+        if r.headers.get("Content-Encoding") == "gzip":
+            body = gzip.decompress(body)
+        return r.status, r.headers, body
 
 
 def test_server_serves_manifest_files_and_spa(served):

@@ -13,6 +13,7 @@ unguessable token - the server never maps URLs onto arbitrary disk paths.
 
 from __future__ import annotations
 
+import gzip
 import json
 import mimetypes
 import os
@@ -317,9 +318,11 @@ class _Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-    def _send_bytes(self, body: bytes, ctype: str) -> None:
+    def _send_bytes(self, body: bytes, ctype: str, encoding: str = "") -> None:
         self.send_response(200)
         self.send_header("Content-Type", ctype)
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -334,7 +337,7 @@ class _Handler(SimpleHTTPRequestHandler):
             body = srv.manifests.get(mid)
             if body is None:
                 return self.send_error(404)
-            return self._send_bytes(body, "application/json")
+            return self._send_bytes(body, "application/json", "gzip")
         if path.startswith("/dcmtk/file/"):
             f = srv.files.get(path.rsplit("/", 1)[-1])
             if f is None:
@@ -427,7 +430,9 @@ def prepare(files: Iterable[Path]) -> tuple[str, Manifest]:
     mid = secrets.token_urlsafe(12)
     with _lock:
         srv.files.update(m.files)
-        srv.manifests[mid] = json.dumps(m.data).encode()
+        # Kept gzipped (~10x smaller; headers are repetitive): a 14k-object
+        # load is tens of MB of JSON and up to MAX_OPENS of them are kept.
+        srv.manifests[mid] = gzip.compress(json.dumps(m.data).encode(), 6)
         srv.opens.append((mid, list(m.files)))
         while len(srv.opens) > MAX_OPENS:
             old_mid, old_tokens = srv.opens.popleft()
