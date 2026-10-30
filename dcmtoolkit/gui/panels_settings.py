@@ -467,7 +467,8 @@ class SettingsPanel(ToolPanel):
         if res.warnings:
             msg.append("\nWarnings:")
             msg.extend("  - " + w for w in res.warnings)
-        msg.append("\nRemember to click 'Save' to persist.")
+        if added:
+            msg.append("\nSaved automatically.")
         messagebox.showinfo("Import complete", "\n".join(msg))
 
     def _export(self) -> None:
