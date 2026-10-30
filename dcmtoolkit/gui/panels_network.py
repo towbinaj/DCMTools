@@ -468,6 +468,7 @@ class QueryMovePanel(ToolPanel):
                   "destination AE (C-MOVE).")
 
     def build(self) -> None:
+        self.body.grid_columnconfigure(0, weight=1)
         self.picker = DestinationPicker(self.body, self.app, label="Source",
                                         remember_key="QueryMovePanel")
         self.picker.grid(row=0, column=0, columnspan=4, sticky="ew",
@@ -611,6 +612,7 @@ class RetrievePanel(ToolPanel):
                   "local folder over one association (firewall-friendly).")
 
     def build(self) -> None:
+        self.body.grid_columnconfigure(0, weight=1)
         self.picker = DestinationPicker(self.body, self.app, label="Source",
                                         remember_key="RetrievePanel")
         self.picker.grid(row=0, column=0, columnspan=4, sticky="ew",
@@ -802,6 +804,7 @@ class StorageCommitPanel(ToolPanel):
 
     def build(self) -> None:
         self.files: list[Path] = []
+        self.body.grid_columnconfigure(0, weight=1)
         self.picker = DestinationPicker(self.body, self.app, label="Archive",
                                         remember_key="StorageCommitPanel")
         self.picker.grid(row=0, column=0, columnspan=4, sticky="ew",
