@@ -710,7 +710,11 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.log.configure(height=80)
         self.body.grid_configure(sticky="nsew")
         self.body.grid_columnconfigure(0, weight=1)
-        self.body.grid_rowconfigure(3, weight=1)
+        # The scrollable form (row 1) and the run output (row 4) absorb vertical
+        # resizing; the action-button row (row 3) stays fixed so De-identify /
+        # Cancel are always visible, even when the window is short.
+        self.body.grid_rowconfigure(1, weight=1)
+        self.body.grid_rowconfigure(4, weight=1)
 
         zone, self.count_lbl = build_drop_zone(
             self.app, self.body, self._on_drop, "De-identify",
