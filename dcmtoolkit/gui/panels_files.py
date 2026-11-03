@@ -346,8 +346,9 @@ class _DropSourceMixin:
 
 class ModifyPanel(_DropSourceMixin, ToolPanel):
     title = "Modify Header"
-    description = ("Batch tag editor: for each row pick a tag (or type a name / "
-                   "ggggeeee code), choose Set a value or Remove, then Apply.")
+    description = ("Batch tag editor: load a study, then for each row pick any "
+                   "of its tags from the dropdown (or type a name / ggggeeee "
+                   "code), choose Set a value or Remove, then Apply.")
 
     def build(self) -> None:
         self.files: list[Path] = []
@@ -368,13 +369,13 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
         ctk.CTkLabel(opsframe, text="= resolved tag").grid(row=0, column=2)
         ctk.CTkLabel(opsframe, text="New value (for Set)").grid(
             row=0, column=3)
-        common = [""] + dicomtags.common_tag_labels()
+        self._common = [""] + dicomtags.common_tag_labels()
         self.op_rows = []
         for i in range(4):
             action = ctk.CTkOptionMenu(opsframe, values=["set", "remove"],
                                        width=90)
             action.grid(row=i + 1, column=0, padx=PAD, pady=3)
-            tag = ctk.CTkComboBox(opsframe, values=common, width=230,
+            tag = ctk.CTkComboBox(opsframe, values=self._common, width=230,
                                   command=lambda _v, r=i: self._resolve_row(r))
             tag.set("")
             tag.grid(row=i + 1, column=1, padx=PAD, pady=3)
@@ -389,18 +390,6 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             except Exception:  # noqa: BLE001
                 pass
             self.op_rows.append((action, tag, name, val))
-
-    def _resolve_row(self, i: int) -> None:
-        _action, tag, name, _val = self.op_rows[i]
-        t, kw = dicomtags.resolve_tag(tag.get())
-        if t is not None:
-            name.configure(text=f"= {kw or 'private'} "
-                                f"({t.group:04X},{t.element:04X})",
-                           text_color=MUTED)
-        elif tag.get().strip():
-            name.configure(text="unknown tag", text_color="#d9695f")
-        else:
-            name.configure(text="")
 
         self.in_place = ctk.CTkCheckBox(
             self.body, text="Overwrite files in place (else write to ./modified)")
@@ -420,6 +409,38 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
         self.runner = BatchRunner(self, verb="changed")
         self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
                                           padx=PAD, pady=(0, PAD))
+
+    def _resolve_row(self, i: int) -> None:
+        _action, tag, name, _val = self.op_rows[i]
+        t, kw = dicomtags.resolve_tag(tag.get())
+        if t is not None:
+            name.configure(text=f"= {kw or 'private'} "
+                                f"({t.group:04X},{t.element:04X})",
+                           text_color=MUTED)
+        elif tag.get().strip():
+            name.configure(text="unknown tag", text_color="#d9695f")
+        else:
+            name.configure(text="")
+
+    def _update_count(self):
+        super()._update_count()
+        self._refresh_tag_choices()
+
+    def _refresh_tag_choices(self) -> None:
+        """Offer the tags present in the loaded study (the first file's header)
+        in every row's dropdown, so any tag in the study is one pick away.
+        Typing a keyword or ggggeeee code still works for tags you want to add.
+        Falls back to the common-tag list when nothing is loaded."""
+        choices = self._common
+        if self.files:
+            labels = dicomtags.file_tag_labels(self.files[0])
+            if labels:
+                choices = [""] + labels
+        for _action, tag, _name, _val in self.op_rows:
+            try:
+                tag.configure(values=choices)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _run(self) -> None:
         if not self.files:
