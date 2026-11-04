@@ -66,6 +66,26 @@ def test_dataset_tag_labels_names_unknown_tag_private():
     assert hit and not hit[0].startswith("["), labels
 
 
+def test_vr_for_tag():
+    assert dicomtags.vr_for_tag(Tag(0x0008, 0x0005)) == "CS"   # char set
+    assert dicomtags.vr_for_tag(Tag(0x0010, 0x0010)) == "PN"   # Patient Name
+    assert dicomtags.vr_for_tag(Tag(0x0008, 0x0020)) == "DA"   # Study Date
+    # A dual VR is returned verbatim; callers treat " or " as "can't check".
+    assert " or " in dicomtags.vr_for_tag(Tag(0x0028, 0x0106))
+    # Private / unrecognised tag -> no VR.
+    assert dicomtags.vr_for_tag(Tag(0x0041, 0x1001)) == ""
+
+
+def test_validate_catches_bad_value_for_vr():
+    # The character-set tag the user asked about validates as a CS value.
+    assert dicomtags.validate("CS", "ISO_IR 100") == (True, "")
+    # A bad calendar date for a DA tag is rejected with a message.
+    ok, msg = dicomtags.validate("DA", "20201301")  # month 13
+    assert not ok and msg
+    # Empty is always allowed (clearing a Type-2 tag).
+    assert dicomtags.validate("CS", "") == (True, "")
+
+
 def test_file_tag_labels_reads_header(tmp_path):
     from pydicom.uid import ExplicitVRLittleEndian
     ds = make_ct()

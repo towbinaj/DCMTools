@@ -369,14 +369,16 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
         ctk.CTkLabel(opsframe, text="= resolved tag").grid(row=0, column=2)
         ctk.CTkLabel(opsframe, text="New value (for Set)").grid(
             row=0, column=3)
+        ctk.CTkLabel(opsframe, text="Valid?").grid(row=0, column=4, padx=PAD)
         self._common = [""] + dicomtags.common_tag_labels()
         self.op_rows = []
         for i in range(4):
-            action = ctk.CTkOptionMenu(opsframe, values=["set", "remove"],
-                                       width=90)
+            action = ctk.CTkOptionMenu(
+                opsframe, values=["set", "remove"], width=90,
+                command=lambda _v, r=i: self._update_row(r))
             action.grid(row=i + 1, column=0, padx=PAD, pady=3)
             tag = ctk.CTkComboBox(opsframe, values=self._common, width=230,
-                                  command=lambda _v, r=i: self._resolve_row(r))
+                                  command=lambda _v, r=i: self._update_row(r))
             tag.set("")
             tag.grid(row=i + 1, column=1, padx=PAD, pady=3)
             name = ctk.CTkLabel(opsframe, text="", width=160, anchor="w",
@@ -384,12 +386,16 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             name.grid(row=i + 1, column=2, padx=PAD, pady=3, sticky="w")
             val = ctk.CTkEntry(opsframe, width=240)
             val.grid(row=i + 1, column=3, padx=PAD, pady=3)
-            try:
-                tag._entry.bind("<KeyRelease>",
-                                lambda _e, r=i: self._resolve_row(r))
-            except Exception:  # noqa: BLE001
-                pass
-            self.op_rows.append((action, tag, name, val))
+            vok = ctk.CTkLabel(opsframe, text="", width=150, anchor="w",
+                               justify="left", wraplength=190, text_color=MUTED)
+            vok.grid(row=i + 1, column=4, padx=PAD, pady=3, sticky="w")
+            for w in (tag, val):
+                try:
+                    w._entry.bind("<KeyRelease>",
+                                  lambda _e, r=i: self._update_row(r))
+                except Exception:  # noqa: BLE001
+                    pass
+            self.op_rows.append((action, tag, name, val, vok))
 
         self.in_place = ctk.CTkCheckBox(
             self.body, text="Overwrite files in place (else write to ./modified)")
@@ -410,8 +416,9 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
         self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
                                           padx=PAD, pady=(0, PAD))
 
-    def _resolve_row(self, i: int) -> None:
-        _action, tag, name, _val = self.op_rows[i]
+    def _update_row(self, i: int) -> None:
+        """Refresh a row's resolved-tag label and its value-validity note."""
+        action, tag, name, val, vok = self.op_rows[i]
         t, kw = dicomtags.resolve_tag(tag.get())
         if t is not None:
             name.configure(text=f"= {kw or 'private'} "
@@ -421,6 +428,26 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             name.configure(text="unknown tag", text_color="#d9695f")
         else:
             name.configure(text="")
+        text, color, _ok = self._value_check(action.get(), t, val.get())
+        vok.configure(text=text, text_color=color)
+
+    @staticmethod
+    def _value_check(action: str, tag, value: str):
+        """(note, colour, ok) for a row's value given its resolved tag. Checks
+        the value against the tag's VR; 'remove', an unresolved tag, a dual/
+        unknown VR, and an empty value (which just clears the tag) are never
+        flagged as errors."""
+        if action == "remove" or tag is None:
+            return "", MUTED, True
+        vr = dicomtags.vr_for_tag(tag)
+        if not vr or " or " in vr:
+            return f"{vr or '?'} - not checked", MUTED, True
+        if value == "":
+            return f"{vr} - empties tag", MUTED, True
+        ok, msg = dicomtags.validate(vr, value)
+        if ok:
+            return f"{vr} OK", MUTED, True
+        return f"{vr}: {msg}", "#d9695f", False
 
     def _update_count(self):
         super()._update_count()
@@ -436,7 +463,7 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             labels = dicomtags.file_tag_labels(self.files[0])
             if labels:
                 choices = [""] + labels
-        for _action, tag, _name, _val in self.op_rows:
+        for _action, tag, _name, _val, _vok in self.op_rows:
             try:
                 tag.configure(values=choices)
             except Exception:  # noqa: BLE001
@@ -447,7 +474,8 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             self.log.write("No files selected.")
             return
         ops = []
-        for action, tag, _name, val in self.op_rows:
+        invalid = []
+        for action, tag, _name, val, _vok in self.op_rows:
             raw = tag.get().strip()
             if not raw:
                 continue
@@ -455,8 +483,18 @@ class ModifyPanel(_DropSourceMixin, ToolPanel):
             if t is None:
                 self.log.write(f"Skipping unrecognized tag: {raw!r}")
                 continue
+            act = action.get()
+            if act == "set":
+                note, _c, ok = self._value_check(act, t, val.get())
+                if not ok:
+                    invalid.append(f"{raw} -> {note}")
             ops.append(fileops.ModifyOp(tag=dicomtags.to_hex(t),
-                                        action=action.get(), value=val.get()))
+                                        action=act, value=val.get()))
+        if invalid:
+            for line in invalid:
+                self.log.write(f"Invalid value: {line}")
+            self.log.write("Fix the value(s) shown in red, then Apply again.")
+            return
         if not ops:
             self.log.write("No operations defined.")
             return

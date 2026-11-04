@@ -117,6 +117,17 @@ def resolve_tag(text: str):
     return None, ""
 
 
+def vr_for_tag(tag) -> str:
+    """Dictionary VR for a tag (e.g. 'CS', 'PN', 'DA'), or '' when the tag is
+    private/unrecognised. A dual VR like 'US or SS' is returned as-is; callers
+    that can't validate it should treat anything containing ' or ' as unknown."""
+    try:
+        from pydicom.datadict import dictionary_VR
+        return dictionary_VR(Tag(tag))
+    except (KeyError, ValueError):
+        return ""
+
+
 def validate(vr: str, value: str) -> tuple[bool, str]:
     """Validate a string value against a DICOM VR. Empty is always allowed
     (Type 2). Returns (ok, message)."""
