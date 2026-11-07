@@ -121,3 +121,89 @@ def storage_scp(contexts=None, handler=None):
                    port=port, timeout=20)
     finally:
         server.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Print2PACS: a throwaway localhost PACS (Storage + Find + Echo), used by the
+# ported Print2PACS engine tests (test_*_p2p.py). All synthetic.
+# ---------------------------------------------------------------------------
+import socket as _socket
+from dataclasses import dataclass as _dataclass, field as _field
+
+from dcmtoolkit.model import Node as _Node
+
+
+def _free_port() -> int:
+    s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+@_dataclass
+class FakePACS:
+    node: _Node
+    received: list = _field(default_factory=list)
+    study_uid: str = "1.2.3.4.5.6.7.8.9.100"
+
+
+@pytest.fixture
+def pacs():
+    from pynetdicom import AE, StoragePresentationContexts, evt
+    from pynetdicom.sop_class import (
+        StudyRootQueryRetrieveInformationModelFind, Verification)
+    from pydicom.uid import RLELossless
+    from dcmtoolkit.print2pacs.video import (VIDEO_SOP_CLASS_UID,
+                                             H264_TRANSFER_SYNTAX)
+
+    port = _free_port()
+    state = FakePACS(node=_Node(name="t", aetitle="TESTPACS",
+                               host="127.0.0.1", port=port))
+
+    def handle_store(event):
+        ds = event.dataset
+        ds.file_meta = event.file_meta
+        state.received.append(ds)
+        return 0x0000
+
+    def handle_find(event):
+        req = event.identifier
+        acc = getattr(req, "AccessionNumber", "") or ""
+        pid = getattr(req, "PatientID", "") or ""
+        ds = Dataset()
+        ds.QueryRetrieveLevel = "STUDY"
+        ds.PatientID = pid or "TEST123"
+        ds.PatientName = "DOE^JANE^A"
+        ds.PatientBirthDate = "19700101"
+        ds.PatientSex = "F"
+        ds.StudyInstanceUID = state.study_uid
+        ds.StudyDate = "20240101"
+        ds.StudyTime = "120000"
+        ds.AccessionNumber = acc or "ACC999"
+        ds.StudyID = "S1"
+        ds.StudyDescription = "TEST STUDY"
+        ds.ReferringPhysicianName = "SMITH^BOB"
+        ds.ModalitiesInStudy = "MR"
+        yield 0xFF00, ds
+        yield 0x0000, None
+
+    def handle_echo(event):
+        return 0x0000
+
+    ae = AE(ae_title="TESTPACS")
+    for cx in StoragePresentationContexts:
+        ae.add_supported_context(cx.abstract_syntax, cx.transfer_syntax)
+    ae.add_supported_context(VIDEO_SOP_CLASS_UID, H264_TRANSFER_SYNTAX)
+    ae.add_supported_context("1.2.840.10008.5.1.4.1.1.7", RLELossless)
+    ae.add_supported_context(StudyRootQueryRetrieveInformationModelFind)
+    ae.add_supported_context(Verification)
+    server = ae.start_server(
+        ("127.0.0.1", port), block=False,
+        evt_handlers=[(evt.EVT_C_STORE, handle_store),
+                      (evt.EVT_C_FIND, handle_find),
+                      (evt.EVT_C_ECHO, handle_echo)])
+    try:
+        yield state
+    finally:
+        server.shutdown()

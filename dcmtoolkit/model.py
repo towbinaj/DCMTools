@@ -113,3 +113,75 @@ class Node:
     @property
     def label(self) -> str:
         return f"{self.name}  ({self.aetitle}@{self.host}:{self.port})"
+
+
+# ---------------------------------------------------------------------------
+# Print2PACS: study reconciliation + new-series details
+# ---------------------------------------------------------------------------
+@dataclass
+class StudyContext:
+    """Patient + study identity pulled from PACS by C-FIND, used to stamp a new
+    Secondary Capture / video / re-filed series onto an *existing* study."""
+
+    patient_id: str = ""
+    patient_name: str = ""
+    birth_date: str = ""       # DICOM DA: YYYYMMDD
+    sex: str = ""              # M / F / O
+    study_uid: str = ""        # existing StudyInstanceUID (the key value)
+    study_date: str = ""
+    study_time: str = ""
+    accession: str = ""
+    study_id: str = ""
+    study_description: str = ""
+    referring_physician: str = ""
+    modalities: str = ""       # ModalitiesInStudy (informational)
+
+    @property
+    def is_resolved(self) -> bool:
+        return bool(self.study_uid)
+
+
+@dataclass
+class SeriesInfo:
+    """Details for the NEW series that the imported items become."""
+
+    modality: str = "OT"                 # Secondary Capture is typically OT
+    series_description: str = "Print2PACS Import"
+    body_part: str = ""
+    series_number: int = 9901            # high number to avoid clashing
+    conversion_type: str = "WSD"         # SC Equipment: WSD/SD/SI/DF/...
+
+
+# Standard DICOM Body Part Examined defined terms (PS3.16 Annex L). Uppercase,
+# no spaces. The GUI offers these as suggestions but still allows a custom value.
+BODY_PARTS_EXAMINED = [
+    "ABDOMEN", "ABDOMENPELVIS", "ADRENAL", "ANKLE", "AORTA", "ARM", "AXILLA",
+    "BACK", "BLADDER", "BRAIN", "BREAST", "BRONCHUS", "BUTTOCK", "CALCANEUS",
+    "CALF", "CAROTID", "CEREBELLUM", "CERVIX", "CHEEK", "CHEST", "CHESTABDOMEN",
+    "CHESTABDPELVIS", "CLAVICLE", "COCCYX", "COLON", "CORNEA", "CORONARYARTERY",
+    "CSPINE", "DUODENUM", "EAR", "ELBOW", "ESOPHAGUS", "EXTREMITY", "EYE",
+    "EYELID", "FACE", "FEMUR", "FINGER", "FOOT", "FOREARM", "GALLBLADDER",
+    "HAND", "HEAD", "HEADNECK", "HEART", "HIP", "HUMERUS", "ILEUM", "ILIUM",
+    "JAW", "JEJUNUM", "KIDNEY", "KNEE", "LARYNX", "LEG", "LIVER", "LSPINE",
+    "LUNG", "MAXILLA", "MEDIASTINUM", "MOUTH", "NECK", "NOSE", "ORBIT", "OVARY",
+    "PANCREAS", "PAROTID", "PATELLA", "PELVIS", "PENIS", "PHARYNX", "PROSTATE",
+    "RADIUS", "RADIUSULNA", "RECTUM", "RIB", "SACRUM", "SCALP", "SCAPULA",
+    "SCLERA", "SCROTUM", "SHOULDER", "SKULL", "SPINE", "SPLEEN", "SSPINE",
+    "STERNUM", "STOMACH", "TESTIS", "THIGH", "THUMB", "THYMUS", "THYROID",
+    "TIBIA", "TIBIAFIBULA", "TMJ", "TOE", "TONGUE", "TRACHEA", "TSPINE", "ULNA",
+    "URETER", "URETHRA", "UTERUS", "VAGINA", "VULVA", "WHOLEBODY", "WRIST",
+    "ZYGOMA",
+]
+
+
+# Allowed SC Equipment ConversionType values (PS3.3 C.8.6.1).
+CONVERSION_TYPES = {
+    "DV": "Digitized Video",
+    "DI": "Digital Interface",
+    "DF": "Digitized Film",
+    "WSD": "Workstation",
+    "SD": "Scanned Document",
+    "SI": "Scanned Image",
+    "DRW": "Drawing",
+    "SYN": "Synthetic Image",
+}

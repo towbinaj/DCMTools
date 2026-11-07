@@ -29,6 +29,8 @@ build/
 dist/
 # OHIF viewer build - fetched by scripts/fetch_ohif.py (pinned + hash-checked)
 assets/ohif-viewer/
+# Bundled ffmpeg for Print2PACS video - fetched by scripts/fetch_ffmpeg.py
+assets/ffmpeg/
 *.manifest
 *.spec.bak
 

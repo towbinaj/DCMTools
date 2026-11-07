@@ -13,6 +13,7 @@ pyinstaller-hooks-contrib==2026.9
 pylibjpeg==2.1.0
 pylibjpeg-libjpeg==2.5.0
 pylibjpeg-openjpeg==2.6.0
+pymupdf==1.28.2
 pynetdicom==3.0.4
 pywin32==312
 pywin32-ctypes==0.2.3

@@ -101,6 +101,10 @@ jobs:
         if: ${{ success() && steps.ver.outputs.do == 'true' }}
         run: python scripts/fetch_ohif.py
 
+      - name: Fetch ffmpeg (Print2PACS video)
+        if: ${{ success() && steps.ver.outputs.do == 'true' }}
+        run: python scripts/fetch_ffmpeg.py
+
       - name: Build exe
         if: ${{ success() && steps.ver.outputs.do == 'true' }}
         run: pyinstaller DICOMToolkit.spec --noconfirm --clean

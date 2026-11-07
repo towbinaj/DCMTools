@@ -38,6 +38,7 @@ initiate to destinations *you* configure.
 | **Tag Compare** | Diff the DICOM tags of two images, two series, or two studies (representative instance per side): see different / A-only / B-only / same, filter to differences, by tag class, by validity status (valid / error / not-in-IOD / NA), or by text, and export CSV. |
 | **QA / Consistency** | Scan a folder for problems (see below). |
 | **De-identify Files** | DICOM PS3.15 Basic Profile + the receiver's anonymize/morph/pixel-blank engine. |
+| **Print2PACS** | Send images, PDFs, video, or existing DICOM objects to PACS as a **new series on an existing study**. Drop items, look up the study by accession/patient ID (C-FIND), set the series details, and send (C-STORE). Images/PDF → Secondary Capture; video → encapsulated H.264 (bundled ffmpeg); a dropped DICOM is re-filed onto the study keeping its modality. Replaces the legacy *DCMPrint2PACS* without a virtual printer driver. |
 | **Modality SCU** | Query the Modality Worklist, then perform an exam: MPPS In Progress → stamp & send images → MPPS Completed. |
 | **HL7 Sender** | Send HL7 v2 (ADT / ORU / ORM) over MLLP to an endpoint saved in Settings (**+ HL7 / MLLP** group), and read the ACK. Paste one message or batch a folder of `.hl7` files; per-type templates; optional MSH timestamp + control-ID refresh on send. (Send-only; mimics SmartHL7.Sender.) |
 

@@ -17,6 +17,11 @@ for _root, _dirs, _files in os.walk(os.path.join("assets", "dicom-standard")):
 for _root, _dirs, _files in os.walk(os.path.join("assets", "ohif-viewer")):
     for _f in _files:
         datas.append((os.path.join(_root, _f), _root))
+# Bundled ffmpeg for Print2PACS video import (fetched by scripts/fetch_ffmpeg.py;
+# not in git). Optional: without it, video import explains how to add ffmpeg.
+for _root, _dirs, _files in os.walk(os.path.join("assets", "ffmpeg")):
+    for _f in _files:
+        datas.append((os.path.join(_root, _f), _root))
 binaries = []
 hiddenimports = []
 
@@ -27,6 +32,17 @@ for pkg in ("customtkinter", "tkinterdnd2"):
     datas += d
     binaries += b
     hiddenimports += h
+
+# PyMuPDF (imported as `pymupdf`/`fitz`) for PDF import in Print2PACS; bundle its
+# compiled bindings and data so PDF rasterization works in the frozen exe.
+for pkg in ("pymupdf", "fitz"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+    except Exception:
+        pass
 
 # pynetdicom registers SOP classes dynamically; pull in all submodules.
 hiddenimports += collect_submodules("pynetdicom")

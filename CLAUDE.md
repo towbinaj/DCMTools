@@ -9,9 +9,9 @@ A single double-click Windows app (`DICOMToolkit.exe`) that replaces the legacy
 `DCM*` tools, built on pydicom / pynetdicom / CustomTkinter and packaged with
 PyInstaller. One app, many tabs (Echo, Send, Query/Move, Retrieve, Store
 Receiver, Modality SCU, Tag Lister, Tag Compare, Preview, Modify, Split,
-Enhanced→Classic, Folder Dump, De-identify, QA, HL7 Sender). Runs fully offline;
-the only network calls it makes on its own are HTTPS GETs to GitHub for
-self-update. (The OHIF viewer's web server listens on 127.0.0.1 only.)
+Enhanced→Classic, Folder Dump, De-identify, QA, HL7 Sender, Print2PACS). Runs
+fully offline; the only network calls it makes on its own are HTTPS GETs to
+GitHub for self-update. (The OHIF viewer's web server listens on 127.0.0.1 only.)
 
 ## Security & privacy — non-negotiable
 - **The GitHub repo is public and must stay secret-free.** Never commit real AE
@@ -60,19 +60,28 @@ hooks or signing unless asked.
 ## Architecture notes
 - `dcmtoolkit/`: `net/` (scu/scp/mwl/mpps/selftest), `store/processing.py`
   (anonymize/morph/pixel/dates engine), `tools/` (fileops, qa, conformance,
-  render, enhanced, compare, tagclass, validity, dicomtags, ohif), `hl7/` (mllp +
+  render, enhanced, compare, tagclass, validity, dicomtags, ohif), `print2pacs/`
+  (GUI-free engine ported from the standalone Print2PACS app: sc_import /
+  dicom_import / video / ffmpeg_tools / reconcile / send), `hl7/` (mllp +
   message), `gui/` (`app.py` + `panels_*.py`), `support.py`, `updater.py`.
 - GUI: panels are built lazily and switched with `tkraise` (z-order), never
   rebuilt or background-prewarmed — prewarming made it much slower.
 - Destinations are `Node`s grouped PACS/Storage · Worklist/MPPS · HL7/MLLP;
   each tool's picker filters by group. HL7 endpoints need no AE title.
 - Packaging is **onefile** by design (one portable .exe). That makes launch and
-  close slow (it extracts ~90 MB, plus ~50 MB of OHIF, to %TEMP% each run and deletes it on exit) —
-  this is accepted; `onedir` is the fix if ever revisited.
+  close slow (it extracts ~90 MB, plus ~50 MB of OHIF and ~160 MB of ffmpeg, to
+  %TEMP% each run and deletes it on exit) — this is accepted; `onedir` is the fix
+  if ever revisited.
 - Bundled offline: the DICOM standard JSON (IOD conformance), the
-  JPEG/JPEG2000/JPEG-LS decoders, and the OHIF viewer build
+  JPEG/JPEG2000/JPEG-LS decoders, the OHIF viewer build
   (`assets/ohif-viewer/`, ~50 MB, git-ignored; fetched pinned + SHA-512-checked
-  by `scripts/fetch_ohif.py`, which CI runs before PyInstaller).
+  by `scripts/fetch_ohif.py`), and ffmpeg for Print2PACS video
+  (`assets/ffmpeg/`, ~160 MB, git-ignored; fetched by `scripts/fetch_ffmpeg.py`).
+  CI runs both fetch scripts before PyInstaller.
+- Print2PACS (`print2pacs/` engine + `gui/panels_print2pacs.py`): import images /
+  PDF / video / DICOM as a new series on an existing study. Reuses the toolkit's
+  `net/scu` (C-FIND lookup + C-STORE), `model.Node`, and `DestinationPicker`;
+  needs `pymupdf` (PDF) and bundled ffmpeg (video, Video Photographic H.264).
 - OHIF viewer (`tools/ohif.py`): a 127.0.0.1-only HTTP server serves the OHIF
   build plus only the files registered for an "Open in OHIF" request (random
   per-file tokens), and a `dicomjson` manifest built from the headers replaces
