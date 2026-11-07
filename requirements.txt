@@ -8,7 +8,7 @@ packaging==26.3
 pefile==2024.8.26
 pillow==12.3.0
 pydicom==3.0.2
-pyinstaller==6.22.0
+pyinstaller==6.22.3
 pyinstaller-hooks-contrib==2026.6
 pylibjpeg==2.1.0
 pylibjpeg-libjpeg==2.4.0
