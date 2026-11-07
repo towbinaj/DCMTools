@@ -1,0 +1,18 @@
+# Code owners for DICOM Toolkit.
+#
+# The repository owner is the default reviewer for every change. This file is
+# only *enforced* if branch protection on `main` enables
+# "Require review from Code Owners" — on its own it just records ownership.
+# (Note: enforcing it would require pull requests and block the current
+# push-empty-release-commit-to-main release flow, since you can't approve your
+# own PR.)
+
+# Everything.
+*                       @towbinaj
+
+# Security- and privacy-sensitive areas, called out explicitly so they are
+# never changed without owner review once enforcement is on.
+/SECURITY.md            @towbinaj
+/.github/               @towbinaj
+/dcmtoolkit/support.py  @towbinaj
+/dcmtoolkit/updater.py  @towbinaj
