@@ -25,7 +25,9 @@ import customtkinter as ctk
 from ..model import (StudyContext, SeriesInfo, BODY_PARTS_EXAMINED,
                      CONVERSION_TYPES, DEST_GROUP_STORAGE)
 from ..net import scu
-from ..print2pacs import sc_import, video, dicom_import, reconcile, send
+from ..print2pacs import (sc_import, video, dicom_import, ffmpeg_tools,
+                          reconcile, send)
+from ..tools import render
 from .base import ToolPanel
 from .theme import MUTED
 from .widgets import (DestinationPicker, StepWizard, build_drop_zone,
@@ -47,8 +49,9 @@ class Print2PACSPanel(ToolPanel):
     # -- build -----------------------------------------------------------
     def build(self) -> None:
         self.pages: list[sc_import.SourcePage] = []
-        self.videos: list[Path] = []
-        self.dicoms: list[dicom_import.DicomSource] = []
+        self.videos: list = []          # (Path, PIL thumbnail or None)
+        self.dicoms: list = []          # (DicomSource, PIL thumbnail or None)
+        self._thumb_imgs: list = []     # keep CTkImage refs alive (GC guard)
         self.studies: list[StudyContext] = []
         self.chosen_study: StudyContext | None = None
         self._busy = False
@@ -201,8 +204,10 @@ class Print2PACSPanel(ToolPanel):
 
         def work():
             pages = sc_import.load_many(img, PDF_DPI)
-            dcms = [dicom_import.load_dicom(d) for d in dcm]
-            return pages, [Path(v) for v in vid], dcms
+            vids = [(Path(v), self._video_thumb(v)) for v in vid]
+            dcms = [(dicom_import.load_dicom(d), self._dicom_thumb(d))
+                    for d in dcm]
+            return pages, vids, dcms
 
         def done(result):
             pages, vids, dcms = result
@@ -221,31 +226,71 @@ class Print2PACSPanel(ToolPanel):
 
     def _clear(self):
         self.pages, self.videos, self.dicoms = [], [], []
+        self._thumb_imgs = []
         self._refresh_items()
+
+    @staticmethod
+    def _video_thumb(path):
+        """First video frame as a PIL thumbnail (needs ffmpeg); None if not."""
+        try:
+            if ffmpeg_tools.have_ffmpeg():
+                return video.first_frame(path)
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    @staticmethod
+    def _dicom_thumb(path):
+        """Render a dropped DICOM's first frame to a PIL image; None on any
+        failure (non-image object, missing decoder, ...)."""
+        try:
+            from pydicom import dcmread
+            ds = dcmread(str(path), force=True)
+            return render.render_image(ds, 0)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _thumb_widget(self, parent, pil):
+        """A 64px thumbnail label for a PIL image, or a 'no preview' placeholder.
+        Keeps the CTkImage referenced so Tk doesn't garbage-collect it."""
+        if pil is not None:
+            try:
+                t = pil.copy()
+                t.thumbnail((64, 64))
+                img = ctk.CTkImage(light_image=t, dark_image=t, size=t.size)
+                self._thumb_imgs.append(img)
+                return ctk.CTkLabel(parent, image=img, text="")
+            except Exception:  # noqa: BLE001
+                pass
+        return ctk.CTkLabel(parent, text="no\npreview", width=64, height=44,
+                            text_color=MUTED, font=ctk.CTkFont(size=10))
 
     def _refresh_items(self):
         for w in self.items.winfo_children():
             w.destroy()
-        rows = ([("Image/PDF",
-                  Path(p.source).name + (f"  p{p.page_index + 1}"
-                                         if p.page_index else ""),
-                  ("page", i)) for i, p in enumerate(self.pages)]
-                + [("Video", Path(v).name, ("video", i))
-                   for i, v in enumerate(self.videos)]
-                + [("DICOM (re-file)", d.label, ("dicom", i))
-                   for i, d in enumerate(self.dicoms)])
-        for row, (kind, name, ref) in enumerate(rows):
+        self._thumb_imgs = []
+        items = []
+        for i, p in enumerate(self.pages):
+            nm = Path(p.source).name + (f"  (page {p.page_index + 1})"
+                                        if p.page_index else "")
+            items.append(("Image/PDF", nm, p.image, ("page", i)))
+        for i, (v, thumb) in enumerate(self.videos):
+            items.append(("Video", Path(v).name, thumb, ("video", i)))
+        for i, (s, thumb) in enumerate(self.dicoms):
+            items.append(("DICOM (re-file)", s.label, thumb, ("dicom", i)))
+        for row, (kind, name, pil, ref) in enumerate(items):
             fr = ctk.CTkFrame(self.items)
             fr.grid(row=row, column=0, sticky="ew", pady=2, padx=2)
-            fr.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(fr, text=kind, width=120, anchor="w",
-                         text_color=MUTED).grid(row=0, column=0, padx=PAD)
+            fr.grid_columnconfigure(2, weight=1)
+            self._thumb_widget(fr, pil).grid(row=0, column=0, padx=6, pady=4)
+            ctk.CTkLabel(fr, text=kind, width=110, anchor="w",
+                         text_color=MUTED).grid(row=0, column=1, padx=(0, PAD))
             ctk.CTkLabel(fr, text=str(name), anchor="w").grid(
-                row=0, column=1, sticky="w")
+                row=0, column=2, sticky="w")
             ctk.CTkButton(fr, text="Remove", width=70, fg_color="transparent",
                           border_width=1,
                           command=lambda r=ref: self._remove(r)).grid(
-                row=0, column=2, padx=PAD)
+                row=0, column=3, padx=PAD)
         n = len(self.pages) + len(self.videos) + len(self.dicoms)
         self.count_lbl.configure(
             text="No items." if not n else
@@ -397,7 +442,7 @@ class Print2PACSPanel(ToolPanel):
                     datasets.extend(sc_import.convert_pages(
                         pages, study, replace(si, series_number=snum)))
                     snum += 1
-            for vpath in videos:
+            for vpath, _thumb in videos:
                 self.log.write(f"Transcoding {vpath.name} ...")
                 datasets.append(video.convert_video(
                     vpath, study, replace(si, modality="XC" if auto else forced,
@@ -406,7 +451,7 @@ class Print2PACSPanel(ToolPanel):
             if dicoms:
                 self.log.write(f"Re-filing {len(dicoms)} DICOM object(s) ...")
                 datasets.extend(dicom_import.convert_dicoms(
-                    dicoms, study, replace(si, series_number=snum),
+                    [s for s, _ in dicoms], study, replace(si, series_number=snum),
                     strip_private=strip_private))
                 snum += 1
             self.log.write(f"Sending {len(datasets)} object(s) to {node.name} ...")
