@@ -19,7 +19,8 @@ from ..store.processing import ReceiverConfig
 from .base import ToolPanel
 from .batch import BatchRunner
 from .theme import MUTED
-from .widgets import DestinationPicker, build_drop_zone, run_threaded, PAD
+from .widgets import (DestinationPicker, StepWizard, build_drop_zone,
+                      run_threaded, PAD)
 
 
 def _split(text: str) -> list[str]:
@@ -764,27 +765,35 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.base_dir: Path | None = None
         self.out_dir: Path | None = None
 
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=0)
         self.log.configure(height=80)
         self.body.grid_configure(sticky="nsew")
         self.body.grid_columnconfigure(0, weight=1)
-        # The scrollable form (row 1) and the run output (row 4) absorb vertical
-        # resizing; the action-button row (row 3) stays fixed so De-identify /
-        # Cancel are always visible, even when the window is short.
-        self.body.grid_rowconfigure(1, weight=1)
-        self.body.grid_rowconfigure(4, weight=1)
+        self.body.grid_rowconfigure(0, weight=1)
 
+        # Three steps: Select files -> Configure de-identify -> Run (+ optional
+        # C-STORE of the output). Next is gated so you can't reach the options
+        # without files; the finish button runs the de-identification.
+        self.wiz = StepWizard(
+            self.body, ["Select files", "Configure de-identify", "Run"],
+            on_finish=self._run, finish_text="De-identify",
+            validate=self._validate_step)
+        self.wiz.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=PAD)
+
+        # -- Step 1: select files --
+        sel = self.wiz.step(0)
+        sel.grid_rowconfigure(0, weight=1)
         zone, self.count_lbl = build_drop_zone(
-            self.app, self.body, self._on_drop, "De-identify",
+            self.app, sel, self._on_drop, "De-identify",
             [("Add Files...", self._add_files, 110),
              ("Add Folder...", self._add_folder, 120),
              ("Output folder...", self._pick_out, 130),
              ("Clear", self._clear, 70)])
-        zone.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
+        zone.grid(row=0, column=0, sticky="ew")
 
-        form = ctk.CTkScrollableFrame(self.body, height=230)
-        form.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=PAD)
+        # -- Step 2: configure --
+        self.wiz.step(1).grid_rowconfigure(0, weight=1)
+        form = ctk.CTkScrollableFrame(self.wiz.step(1))
+        form.grid(row=0, column=0, sticky="nsew")
         form.grid_columnconfigure(1, weight=1)
         r = 0
 
@@ -890,30 +899,35 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             font=ctk.CTkFont(size=11))
         row("", self.morph_hint)
 
-        # Pipeline: optionally C-STORE the de-identified output to a PACS/VNA.
-        sendbar = ctk.CTkFrame(self.body, fg_color="transparent")
-        sendbar.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(0, 2))
+        # -- Step 3: run (+ optional C-STORE of the output) --
+        run = self.wiz.step(2)
+        run.grid_rowconfigure(2, weight=1)
+        sendbar = ctk.CTkFrame(run, fg_color="transparent")
+        sendbar.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+        sendbar.grid_columnconfigure(1, weight=1)
         self.send_after = ctk.CTkCheckBox(
             sendbar, text="Then C-STORE output to:", command=self._toggle_send)
-        self.send_after.pack(side="left")
+        self.send_after.grid(row=0, column=0, sticky="w")
         self.send_picker = DestinationPicker(sendbar, self.app, label="",
                                              remember_key="DeidentifySend")
-        self.send_picker.pack(side="left", fill="x", expand=True, padx=PAD)
+        self.send_picker.grid(row=0, column=1, sticky="ew", padx=PAD)
 
-        btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
-        btnbar.grid(row=3, column=0, sticky="w", padx=PAD, pady=(0, PAD))
-        self.btn = ctk.CTkButton(btnbar, text="De-identify", command=self._run)
-        self.btn.pack(side="left")
-        self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel",
+        ctlbar = ctk.CTkFrame(run, fg_color="transparent")
+        ctlbar.grid(row=1, column=0, sticky="w", pady=(0, 2))
+        self.cancel_btn = ctk.CTkButton(ctlbar, text="Cancel",
                                         command=self._cancel, width=80,
                                         state="disabled", fg_color="#a33",
                                         hover_color="#c44")
-        self.cancel_btn.pack(side="left", padx=PAD)
-        self._workers_control(btnbar)
+        self.cancel_btn.pack(side="left")
+        self._workers_control(ctlbar)
 
         self.runner = BatchRunner(self, verb="written")
-        self.runner.build(self.body).grid(row=4, column=0, sticky="nsew",
-                                          padx=PAD, pady=(0, PAD))
+        self.runner.build(run).grid(row=2, column=0, sticky="nsew")
+
+    def _validate_step(self, i: int):
+        if i == 0 and not self.files:
+            return False, "Add DICOM files or a folder first."
+        return True, ""
 
     def _explain_basic(self) -> None:
         from .. import anon_profiles as ap
@@ -921,10 +935,8 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
                             ap.BASIC_PROFILE_EXPLANATION, parent=self)
 
     def _toggle_send(self) -> None:
-        if self.send_after.get():
-            self.btn.configure(text="De-identify + Send")
-        else:
-            self.btn.configure(text="De-identify")
+        self.wiz.set_finish_text("De-identify + Send" if self.send_after.get()
+                                 else "De-identify")
 
     def on_destinations_changed(self) -> None:
         self.send_picker.refresh()
@@ -1133,7 +1145,7 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         files = list(self.files)
         base = self.base_dir
         total = len(files)
-        self.btn.configure(state="disabled")
+        self.wiz.set_busy(True)
         self.cancel_btn.configure(state="normal")
         self.log.write(f"--- De-identifying {total:,} file(s) -> {out} ---")
         self._last_deident = None
@@ -1148,7 +1160,7 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             return res
 
         def on_done():
-            self.btn.configure(state="normal")
+            self.wiz.set_busy(False)
             self.cancel_btn.configure(state="disabled")
             res = self._last_deident
             if send_node is not None and res and res.written_paths:
@@ -1164,7 +1176,7 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.log.write(f"--- C-STORE {len(paths):,} de-identified file(s) "
                        f"to {node.name} ({node.aetitle}@{node.host}:"
                        f"{node.port}) ---")
-        self.btn.configure(state="disabled")
+        self.wiz.set_busy(True)
 
         def work():
             return scu.c_store(my_ae, node, paths, progress=self.progress,
@@ -1173,10 +1185,10 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         def done(result):
             self.log.write(f"[SEND DONE] {result.sent} sent, {result.failed} "
                            f"failed, {result.warnings} warning(s).")
-            self.btn.configure(state="normal")
+            self.wiz.set_busy(False)
 
         def err(exc, tb):
             self.log.write(f"[SEND ERROR] {exc}")
-            self.btn.configure(state="normal")
+            self.wiz.set_busy(False)
 
         run_threaded(self, work, done, err)

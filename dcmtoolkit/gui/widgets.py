@@ -291,6 +291,12 @@ class StepWizard(ctk.CTkFrame):
     def index(self) -> int:
         return self._i
 
+    def set_finish_text(self, text: str) -> None:
+        """Change the finish-button label; refreshes it if on the last step."""
+        self._finish_text = text
+        if self._i == len(self._steps) - 1:
+            self._next.configure(text=text)
+
     def show(self, i: int) -> None:
         self._i = max(0, min(i, len(self._steps) - 1))
         self._steps[self._i].tkraise()
