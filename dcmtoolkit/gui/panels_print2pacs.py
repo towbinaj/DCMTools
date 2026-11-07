@@ -4,13 +4,13 @@ series on an existing PACS study.
 Ported from the standalone Print2PACS app. The GUI-free engine lives in
 ``dcmtoolkit.print2pacs`` (sc_import / video / dicom_import / reconcile / send);
 this panel is the toolkit-style front end, reusing the shared DestinationPicker,
-drop zone, threaded-run helper and log box.
+drop zone, threaded-run helper, log box, and the StepWizard.
 
-Workflow (top to bottom): drop items -> look up the study by accession / patient
-ID on a query PACS (C-FIND) -> set the new series details -> send to a storage
-PACS (C-STORE). Images/PDF become Secondary Capture; video becomes encapsulated
-H.264 (needs ffmpeg); a dropped DICOM object is re-filed onto the study keeping
-its native modality.
+Three steps: (1) drop items; (2) look up the study by accession / patient ID on
+a query PACS (C-FIND) and confirm it; (3) set the new series details and send to
+a storage PACS (C-STORE). Images/PDF become Secondary Capture; video becomes
+encapsulated H.264 (needs ffmpeg); a dropped DICOM object is re-filed onto the
+study keeping its native modality.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -27,10 +28,10 @@ from ..net import scu
 from ..print2pacs import sc_import, video, dicom_import, reconcile, send
 from .base import ToolPanel
 from .theme import MUTED
-from .widgets import DestinationPicker, build_drop_zone, run_threaded, PAD
+from .widgets import (DestinationPicker, StepWizard, build_drop_zone,
+                      run_threaded, PAD)
 
 AUTO_MODALITY = "Auto (by type)"
-# Modality codes offered for the new series (Auto picks OT/XC by file type).
 MODALITY_CHOICES = [AUTO_MODALITY, "OT", "XC", "SC", "OPT", "OP", "ES",
                     "GM", "SM", "US", "XA"]
 PDF_DPI = 200
@@ -41,8 +42,7 @@ _ERR = "#d9695f"
 class Print2PACSPanel(ToolPanel):
     title = "Print2PACS"
     description = ("Send images, PDFs, video, or existing DICOM objects to PACS "
-                   "as a new series on an existing study: drop items, look up "
-                   "the study by accession, set series details, and send.")
+                   "as a new series on an existing study, in three steps.")
 
     # -- build -----------------------------------------------------------
     def build(self) -> None:
@@ -54,116 +54,116 @@ class Print2PACSPanel(ToolPanel):
         self._busy = False
 
         self.body.grid_columnconfigure(0, weight=1)
-        # Let the items list take the vertical stretch (keep buttons visible on
-        # short windows).
-        self.body.grid_rowconfigure(1, weight=1)
+        self.body.grid_rowconfigure(0, weight=1)
 
-        # Step 1 - items -------------------------------------------------
+        self.wiz = StepWizard(
+            self.body, ["Select items", "Find the study", "Review & send"],
+            on_finish=self._send, finish_text="Send to PACS",
+            validate=self._validate_step)
+        self.wiz.grid(row=0, column=0, sticky="nsew", padx=PAD, pady=(PAD, 2))
+
+        self.pbar = ctk.CTkProgressBar(self.body)
+        self.pbar.set(0)
+        self.pbar.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
+
+        self._build_items(self.wiz.step(0))
+        self._build_study(self.wiz.step(1))
+        self._build_send(self.wiz.step(2))
+        self._refresh_items()
+
+    def _build_items(self, parent) -> None:
+        parent.grid_rowconfigure(1, weight=1)
         build_drop_zone(
-            self.app, self.body, self._on_drop, "Add",
+            self.app, parent, self._on_drop, "Add",
             [("Add files...", self._add_files, 120),
              ("Clear", self._clear, 70)])[0].grid(
-            row=0, column=0, sticky="ew", padx=PAD, pady=(PAD, 2))
-
-        self.items = ctk.CTkScrollableFrame(self.body, height=130,
-                                            label_text="Items to send")
-        self.items.grid(row=1, column=0, sticky="nsew", padx=PAD, pady=2)
+            row=0, column=0, sticky="ew", pady=(0, 2))
+        self.items = ctk.CTkScrollableFrame(parent, label_text="Items to send")
+        self.items.grid(row=1, column=0, sticky="nsew", pady=2)
         self.items.grid_columnconfigure(0, weight=1)
-        self.count_lbl = ctk.CTkLabel(self.body, text="No items.",
+        self.count_lbl = ctk.CTkLabel(parent, text="No items.",
                                       text_color=MUTED, anchor="w")
-        self.count_lbl.grid(row=2, column=0, sticky="w", padx=PAD)
+        self.count_lbl.grid(row=2, column=0, sticky="w")
 
-        # Step 2 - find the study ---------------------------------------
-        q = ctk.CTkFrame(self.body)
-        q.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(PAD, 2))
-        q.grid_columnconfigure(1, weight=1)
+    def _build_study(self, parent) -> None:
+        parent.grid_columnconfigure(1, weight=1)
         self.query_pick = DestinationPicker(
-            q, self.app, label="Query PACS", remember_key="print2pacs_query",
-            groups=(DEST_GROUP_STORAGE,))
+            parent, self.app, label="Query PACS",
+            remember_key="print2pacs_query", groups=(DEST_GROUP_STORAGE,))
         self.query_pick.grid(row=0, column=0, columnspan=4, sticky="ew",
-                             padx=PAD, pady=(PAD, 2))
-        ctk.CTkLabel(q, text="Accession #", width=90, anchor="w").grid(
-            row=1, column=0, padx=PAD, pady=2, sticky="w")
-        self.acc_entry = ctk.CTkEntry(q, width=200)
+                             pady=(0, 6))
+        ctk.CTkLabel(parent, text="Accession #", width=90, anchor="w").grid(
+            row=1, column=0, sticky="w", pady=2)
+        self.acc_entry = ctk.CTkEntry(parent, width=200)
         self.acc_entry.grid(row=1, column=1, sticky="w", pady=2)
-        ctk.CTkLabel(q, text="or Patient ID").grid(row=1, column=2, padx=PAD)
-        self.pid_entry = ctk.CTkEntry(q, width=160)
-        self.pid_entry.grid(row=1, column=3, sticky="w", padx=(0, PAD))
-        bb = ctk.CTkFrame(q, fg_color="transparent")
-        bb.grid(row=2, column=0, columnspan=4, sticky="w", padx=PAD,
-                pady=(2, PAD))
+        ctk.CTkLabel(parent, text="or Patient ID").grid(row=1, column=2, padx=PAD)
+        self.pid_entry = ctk.CTkEntry(parent, width=160)
+        self.pid_entry.grid(row=1, column=3, sticky="w")
+        bb = ctk.CTkFrame(parent, fg_color="transparent")
+        bb.grid(row=2, column=0, columnspan=4, sticky="w", pady=6)
         self.lookup_btn = ctk.CTkButton(bb, text="Look up study",
                                         command=self._lookup, width=130)
         self.lookup_btn.pack(side="left")
         ctk.CTkButton(bb, text="Test (C-ECHO)", command=self._test, width=120,
-                      fg_color="transparent", border_width=1).pack(side="left",
-                                                                   padx=PAD)
-        self.study_menu = ctk.CTkOptionMenu(q, values=["(look up a study)"],
+                      fg_color="transparent", border_width=1).pack(
+            side="left", padx=PAD)
+        self.study_menu = ctk.CTkOptionMenu(parent, values=["(look up a study)"],
                                             command=self._pick_study, width=560)
         self.study_menu.grid(row=3, column=0, columnspan=4, sticky="ew",
-                             padx=PAD, pady=(0, 2))
-        self.study_lbl = ctk.CTkLabel(q, text="No study selected.",
+                             pady=(2, 2))
+        self.study_lbl = ctk.CTkLabel(parent, text="No study selected.",
                                       text_color=MUTED, anchor="w",
                                       justify="left")
-        self.study_lbl.grid(row=4, column=0, columnspan=4, sticky="w",
-                            padx=PAD, pady=(0, PAD))
+        self.study_lbl.grid(row=4, column=0, columnspan=4, sticky="w")
 
-        # Step 3 - series details + send --------------------------------
-        s = ctk.CTkFrame(self.body)
-        s.grid(row=4, column=0, sticky="ew", padx=PAD, pady=(PAD, 2))
-        s.grid_columnconfigure((1, 3), weight=1)
-        ctk.CTkLabel(s, text="Modality", width=90, anchor="w").grid(
-            row=0, column=0, padx=PAD, pady=4, sticky="w")
-        self.modality = ctk.CTkOptionMenu(s, values=MODALITY_CHOICES, width=160)
+    def _build_send(self, parent) -> None:
+        parent.grid_columnconfigure((1, 3), weight=1)
+        ctk.CTkLabel(parent, text="Modality", width=90, anchor="w").grid(
+            row=0, column=0, pady=4, sticky="w")
+        self.modality = ctk.CTkOptionMenu(parent, values=MODALITY_CHOICES,
+                                          width=160)
         self.modality.grid(row=0, column=1, sticky="w", pady=4)
-        ctk.CTkLabel(s, text="Conversion").grid(row=0, column=2, padx=PAD)
+        ctk.CTkLabel(parent, text="Conversion").grid(row=0, column=2, padx=PAD)
         self.conv = ctk.CTkOptionMenu(
-            s, width=200,
+            parent, width=200,
             values=[f"{k} - {v}" for k, v in CONVERSION_TYPES.items()])
         self.conv.set("WSD - Workstation")
-        self.conv.grid(row=0, column=3, sticky="w", pady=4, padx=(0, PAD))
-        ctk.CTkLabel(s, text="Description", width=90, anchor="w").grid(
-            row=1, column=0, padx=PAD, pady=4, sticky="w")
-        self.desc = ctk.CTkEntry(s)
+        self.conv.grid(row=0, column=3, sticky="w", pady=4)
+        ctk.CTkLabel(parent, text="Description", width=90, anchor="w").grid(
+            row=1, column=0, pady=4, sticky="w")
+        self.desc = ctk.CTkEntry(parent)
         self.desc.insert(0, "Print2PACS Import")
-        self.desc.grid(row=1, column=1, columnspan=3, sticky="ew", pady=4,
-                       padx=(0, PAD))
-        ctk.CTkLabel(s, text="Body part", width=90, anchor="w").grid(
-            row=2, column=0, padx=PAD, pady=4, sticky="w")
-        self.body_part = ctk.CTkComboBox(s, values=[""] + BODY_PARTS_EXAMINED,
+        self.desc.grid(row=1, column=1, columnspan=3, sticky="ew", pady=4)
+        ctk.CTkLabel(parent, text="Body part", width=90, anchor="w").grid(
+            row=2, column=0, pady=4, sticky="w")
+        self.body_part = ctk.CTkComboBox(parent, values=[""] + BODY_PARTS_EXAMINED,
                                          width=200)
         self.body_part.set("")
         self.body_part.grid(row=2, column=1, sticky="w", pady=4)
         self.strip_private = ctk.CTkCheckBox(
-            s, text="Strip private tags (dropped DICOM)")
-        self.strip_private.grid(row=2, column=2, columnspan=2, sticky="w",
-                                padx=PAD)
-        self.keep_copy = ctk.CTkCheckBox(s, text="Keep a local copy of what's sent")
-        self.keep_copy.grid(row=3, column=0, columnspan=2, sticky="w", padx=PAD,
-                            pady=(0, PAD))
-
-        snd = ctk.CTkFrame(self.body, fg_color="transparent")
-        snd.grid(row=5, column=0, sticky="ew", padx=PAD, pady=(PAD, 2))
-        snd.grid_columnconfigure(0, weight=1)
+            parent, text="Strip private tags (dropped DICOM)")
+        self.strip_private.grid(row=2, column=2, columnspan=2, sticky="w")
+        self.keep_copy = ctk.CTkCheckBox(
+            parent, text="Keep a local copy of what's sent")
+        self.keep_copy.grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 4))
         self.send_pick = DestinationPicker(
-            snd, self.app, label="Send PACS", remember_key="print2pacs_send",
-            groups=(DEST_GROUP_STORAGE,))
-        self.send_pick.grid(row=0, column=0, sticky="ew")
-        self.send_btn = ctk.CTkButton(snd, text="Send to PACS",
-                                      command=self._send, width=140)
-        self.send_btn.grid(row=0, column=1, padx=PAD)
-
-        self.pbar = ctk.CTkProgressBar(self.body)
-        self.pbar.set(0)
-        self.pbar.grid(row=6, column=0, sticky="ew", padx=PAD, pady=(0, PAD))
-
-        self._refresh_items()
+            parent, self.app, label="Send PACS",
+            remember_key="print2pacs_send", groups=(DEST_GROUP_STORAGE,))
+        self.send_pick.grid(row=4, column=0, columnspan=4, sticky="ew",
+                           pady=(PAD, 0))
 
     def on_destinations_changed(self) -> None:
-        for p in (getattr(self, "query_pick", None), getattr(self, "send_pick",
-                                                             None)):
+        for p in (getattr(self, "query_pick", None),
+                  getattr(self, "send_pick", None)):
             if p:
                 p.refresh()
+
+    def _validate_step(self, i: int):
+        if i == 0 and not (self.pages or self.videos or self.dicoms):
+            return False, "Add at least one item to send."
+        if i == 1 and not self.chosen_study:
+            return False, "Look up and select a study first."
+        return True, ""
 
     # -- items -----------------------------------------------------------
     @staticmethod
@@ -172,7 +172,6 @@ class Print2PACSPanel(ToolPanel):
                 or dicom_import.is_dicom(p))
 
     def _add_files(self):
-        from tkinter import filedialog
         files = filedialog.askopenfilenames(
             title="Select images, PDF, video, or DICOM",
             filetypes=[("Images / PDF", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff "
@@ -198,7 +197,6 @@ class Print2PACSPanel(ToolPanel):
         dcm = [p for p in accepted
                if not sc_import.is_supported(p) and not video.is_video(p)
                and dicom_import.is_dicom(p)]
-
         self.count_lbl.configure(text="Loading...")
 
         def work():
@@ -228,7 +226,6 @@ class Print2PACSPanel(ToolPanel):
     def _refresh_items(self):
         for w in self.items.winfo_children():
             w.destroy()
-        row = 0
         rows = ([("Image/PDF",
                   Path(p.source).name + (f"  p{p.page_index + 1}"
                                          if p.page_index else ""),
@@ -237,7 +234,7 @@ class Print2PACSPanel(ToolPanel):
                    for i, v in enumerate(self.videos)]
                 + [("DICOM (re-file)", d.label, ("dicom", i))
                    for i, d in enumerate(self.dicoms)])
-        for kind, name, ref in rows:
+        for row, (kind, name, ref) in enumerate(rows):
             fr = ctk.CTkFrame(self.items)
             fr.grid(row=row, column=0, sticky="ew", pady=2, padx=2)
             fr.grid_columnconfigure(1, weight=1)
@@ -249,7 +246,6 @@ class Print2PACSPanel(ToolPanel):
                           border_width=1,
                           command=lambda r=ref: self._remove(r)).grid(
                 row=0, column=2, padx=PAD)
-            row += 1
         n = len(self.pages) + len(self.videos) + len(self.dicoms)
         self.count_lbl.configure(
             text="No items." if not n else
@@ -356,18 +352,20 @@ class Print2PACSPanel(ToolPanel):
         if self._busy:
             return
         node = self.send_pick.get_node()
-        if not node or not self.chosen_study or not (
-                self.pages or self.videos or self.dicoms):
-            self.log.write("Need a selected study, a Send PACS, and items.")
+        if not node:
+            self.wiz.set_message("Pick a Send PACS.", error=True)
+            return
+        if not self.chosen_study or not (self.pages or self.videos
+                                         or self.dicoms):
+            self.wiz.set_message("Need a selected study and items.", error=True)
             return
         si = self._series_info()
         if not si.series_description:
-            self.log.write("Enter a series description.")
+            self.wiz.set_message("Enter a series description.", error=True)
             return
 
         self._busy = True
-        self.send_btn.configure(state="disabled")
-        self.lookup_btn.configure(state="disabled")
+        self.wiz.set_busy(True)
         self.pbar.set(0)
         self.log.write("Converting items...")
 
@@ -418,8 +416,7 @@ class Print2PACSPanel(ToolPanel):
 
         def done(result):
             self._busy = False
-            self.send_btn.configure(state="normal")
-            self.lookup_btn.configure(state="normal")
+            self.wiz.set_busy(False)
             if result.failed == 0 and result.sent > 0:
                 self.pbar.set(1)
                 self.log.write(f"[DONE] Sent {result.sent} object(s) as a new "
@@ -427,7 +424,10 @@ class Print2PACSPanel(ToolPanel):
                 if keep:
                     self.log.write(f"A copy is in: {job_dir}")
                 self._clear()
+                self.wiz.show(0)
             else:
+                self.wiz.set_message(f"Sent {result.sent}, failed "
+                                     f"{result.failed} - see log.", error=True)
                 self.log.write(f"[WARN] Sent {result.sent}, failed "
                                f"{result.failed}.")
                 for e in result.errors[:8]:
@@ -435,8 +435,7 @@ class Print2PACSPanel(ToolPanel):
 
         def err(exc):
             self._busy = False
-            self.send_btn.configure(state="normal")
-            self.lookup_btn.configure(state="normal")
+            self.wiz.set_busy(False)
             self.log.write(f"[ERROR] Send failed: {exc}")
 
         run_threaded(self, work, done, err)

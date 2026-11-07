@@ -222,3 +222,107 @@ def labeled_entry(master, label: str, default: str = "",
     if default:
         entry.insert(0, default)
     return lbl, entry
+
+
+class StepWizard(ctk.CTkFrame):
+    """A reusable Back/Next step wizard for dense tools.
+
+    Give it the step titles; it lays out a step header, a content area holding
+    one stacked frame per step (populate via :meth:`step`), and a Back/Next nav
+    bar. On the last step, Next becomes the finish button and calls
+    ``on_finish``. An optional ``validate(step_index) -> (ok, message)`` gates
+    advancing (and finishing), so the user can't skip ahead with an incomplete
+    step; the message shows next to the buttons.
+
+    Usage::
+
+        wiz = StepWizard(body, ["Pick files", "Set options", "Run"],
+                         on_finish=self._run, finish_text="Run",
+                         validate=self._validate_step)
+        wiz.grid(row=0, column=0, sticky="nsew")
+        # build each step's widgets into wiz.step(0), wiz.step(1), ...
+    """
+
+    def __init__(self, master, titles, *, on_finish, finish_text="Finish",
+                 validate=None, **kw):
+        super().__init__(master, fg_color="transparent", **kw)
+        self._titles = list(titles)
+        self._on_finish = on_finish
+        self._finish_text = finish_text
+        self._validate = validate
+        self._i = 0
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        self._head = ctk.CTkLabel(
+            self, anchor="w", font=ctk.CTkFont(size=15, weight="bold"))
+        self._head.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(0, 4))
+
+        holder = ctk.CTkFrame(self, fg_color="transparent")
+        holder.grid(row=1, column=0, sticky="nsew")
+        holder.grid_columnconfigure(0, weight=1)
+        holder.grid_rowconfigure(0, weight=1)
+        self._steps = []
+        for _ in self._titles:
+            f = ctk.CTkFrame(holder, fg_color="transparent")
+            f.grid(row=0, column=0, sticky="nsew")
+            f.grid_columnconfigure(0, weight=1)
+            self._steps.append(f)
+
+        nav = ctk.CTkFrame(self, fg_color="transparent")
+        nav.grid(row=2, column=0, sticky="ew", padx=PAD, pady=(6, 0))
+        self._msg = ctk.CTkLabel(nav, text="", text_color=MUTED, anchor="w")
+        self._msg.pack(side="left")
+        self._next = ctk.CTkButton(nav, text="Next", width=120,
+                                   command=self._go_next)
+        self._next.pack(side="right")
+        self._back = ctk.CTkButton(nav, text="Back", width=90,
+                                   fg_color="transparent", border_width=1,
+                                   command=self._go_back)
+        self._back.pack(side="right", padx=PAD)
+        self.show(0)
+
+    def step(self, i: int) -> ctk.CTkFrame:
+        """The parent frame to build step ``i``'s widgets into."""
+        return self._steps[i]
+
+    @property
+    def index(self) -> int:
+        return self._i
+
+    def show(self, i: int) -> None:
+        self._i = max(0, min(i, len(self._steps) - 1))
+        self._steps[self._i].tkraise()
+        self._head.configure(
+            text=f"Step {self._i + 1} of {len(self._steps)}:  "
+                 f"{self._titles[self._i]}")
+        self._back.configure(state="normal" if self._i else "disabled")
+        last = self._i == len(self._steps) - 1
+        self._next.configure(text=self._finish_text if last else "Next")
+        self._msg.configure(text="")
+
+    def set_message(self, text: str, error: bool = False) -> None:
+        self._msg.configure(text=text,
+                            text_color=("#d9695f" if error else MUTED))
+
+    def set_busy(self, busy: bool) -> None:
+        """Disable the nav (e.g. while the final action runs)."""
+        state = "disabled" if busy else "normal"
+        self._next.configure(state=state)
+        self._back.configure(
+            state="disabled" if (busy or not self._i) else "normal")
+
+    def _go_next(self) -> None:
+        if self._validate:
+            ok, msg = self._validate(self._i)
+            if not ok:
+                self.set_message(msg or "Complete this step first.", error=True)
+                return
+        if self._i == len(self._steps) - 1:
+            self._on_finish()
+        else:
+            self.show(self._i + 1)
+
+    def _go_back(self) -> None:
+        self.show(self._i - 1)
