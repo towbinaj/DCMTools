@@ -9,7 +9,8 @@ A single double-click Windows app (`DICOMToolkit.exe`) that replaces the legacy
 `DCM*` tools, built on pydicom / pynetdicom / CustomTkinter and packaged with
 PyInstaller. One app, many tabs (Echo, Send, Query/Move, Retrieve, Store
 Receiver, Modality SCU, Tag Lister, Tag Compare, Preview, Modify, Split,
-Enhanced→Classic, Folder Dump, De-identify, QA, HL7 Sender, Print2PACS). Runs
+Enhanced→Classic, Folder Dump, Make DICOMDIR, De-identify, QA, HL7 Sender,
+Print2PACS). Runs
 fully offline; the only network calls it makes on its own are HTTPS GETs to
 GitHub for self-update. (The OHIF viewer's web server listens on 127.0.0.1 only.)
 
@@ -60,7 +61,8 @@ hooks or signing unless asked.
 ## Architecture notes
 - `dcmtoolkit/`: `net/` (scu/scp/mwl/mpps/selftest), `store/processing.py`
   (anonymize/morph/pixel/dates engine), `tools/` (fileops, qa, conformance,
-  render, enhanced, compare, tagclass, validity, dicomtags, ohif), `print2pacs/`
+  render, enhanced, compare, tagclass, validity, dicomtags, dicomdir, ohif),
+  `print2pacs/`
   (GUI-free engine ported from the standalone Print2PACS app: sc_import /
   dicom_import / video / ffmpeg_tools / reconcile / send), `hl7/` (mllp +
   message), `gui/` (`app.py` + `panels_*.py`), `support.py`, `updater.py`.

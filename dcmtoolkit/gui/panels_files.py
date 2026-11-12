@@ -9,6 +9,7 @@ import customtkinter as ctk
 
 from .. import config
 from ..tools import fileops
+from ..tools import dicomdir
 from ..tools import dicomtags
 from ..tools import enhanced
 from ..tools import tagclass
@@ -43,6 +44,7 @@ class TagListPanel(ToolPanel):
     def build(self) -> None:
         self._rows = []        # all parsed tag rows for the loaded file
         self._path = None
+        self._folder_sources = []   # folder(s) last dropped/opened (for DICOMDIR)
         self._conf = ({}, [], "")   # (per_tag code map, missing list, note)
         bar = ctk.CTkFrame(self.body, border_width=2,
                            border_color=("gray60", "gray45"), corner_radius=10)
@@ -58,6 +60,12 @@ class TagListPanel(ToolPanel):
         self.drop_hint.pack(side="left", padx=8)
         ctk.CTkButton(bar, text="Clear", width=70, command=self._clear).pack(
             side="right", padx=6, pady=8)
+        # Build a media file-set (DICOMDIR) from the loaded folder(s) - handy
+        # for importing a PACS export into a VNA / workstation as DICOM media.
+        self.dicomdir_btn = ctk.CTkButton(
+            bar, text="Create DICOMDIR...", width=150,
+            command=self._make_dicomdir)
+        self.dicomdir_btn.pack(side="right", padx=2, pady=8)
         self.path_lbl = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.path_lbl.pack(side="left", padx=PAD)
 
@@ -140,11 +148,13 @@ class TagListPanel(ToolPanel):
         first DICOM found is loaded."""
         files = [p for p in paths if p.is_file()]
         if files:
+            self._folder_sources = []
             self._load(files[0])
             return
         folders = [p for p in paths if p.is_dir()]
         if not folders:
             return
+        self._folder_sources = list(folders)
         self.path_lbl.configure(text="Scanning folder...")
 
         def work():
@@ -173,6 +183,7 @@ class TagListPanel(ToolPanel):
     def _clear(self) -> None:
         self._rows = []
         self._path = None
+        self._folder_sources = []
         self._conf = ({}, [], "")
         self.log.clear()
         self.search.delete(0, "end")
@@ -188,12 +199,66 @@ class TagListPanel(ToolPanel):
             title="Select a DICOM file",
             filetypes=[("DICOM", "*.dcm *.dic *.ima"), ("All files", "*.*")])
         if p:
+            self._folder_sources = []
             self._load(Path(p))
 
     def _open_folder(self) -> None:
         folder = filedialog.askdirectory(title="Select a folder of DICOM files")
         if folder:
             self._ingest([Path(folder)])
+
+    def _make_dicomdir(self) -> None:
+        """Build a conformant media file-set (DICOMDIR) from the loaded
+        folder(s) - a copy suitable for importing into a VNA / workstation as
+        DICOM media. Prompts for a folder if none is loaded. Sources are left
+        untouched; the copy goes into a new folder the user chooses."""
+        folders = list(getattr(self, "_folder_sources", []))
+        if not folders:
+            picked = filedialog.askdirectory(
+                title="Select a folder of DICOM files to index")
+            if not picked:
+                return
+            folders = [Path(picked)]
+        parent = filedialog.askdirectory(
+            title="Choose where to create the DICOMDIR file-set")
+        if not parent:
+            return
+        out = dicomdir.unique_dir(Path(parent),
+                                  (folders[0].name or "dicom") + "_fileset")
+        self.path_lbl.configure(text="Building DICOMDIR...")
+        self.log.set_text(f"Building DICOMDIR from {len(folders)} folder(s)\n"
+                          f"  -> {out}\n(searching subfolders...)")
+        self.dicomdir_btn.configure(state="disabled")
+
+        def work():
+            return dicomdir.make_dicomdir(folders, out, progress=lambda _m: None)
+
+        def done(res):
+            self.path_lbl.configure(text="")
+            self.dicomdir_btn.configure(state="normal")
+            if res.dicomdir:
+                extra = (f"  Records via fallback: {res.custom:,}\n"
+                         if res.custom else "")
+                self.log.set_text(
+                    "DICOMDIR file-set created.\n\n"
+                    f"  Instances indexed: {res.added:,}\n"
+                    f"  Patients: {res.patients}   Studies: {res.studies}   "
+                    f"Series: {res.series}\n"
+                    f"  Skipped (non-DICOM / invalid): {res.skipped:,}\n"
+                    f"{extra}\n"
+                    f"  Output folder: {out}\n"
+                    f"  Index file:    {res.dicomdir}\n\n"
+                    "Import this folder as DICOM media on the VNA / workstation.")
+            else:
+                self.log.set_text("No DICOMDIR written - no valid DICOM "
+                                  "instances were found in the folder(s).")
+
+        def err(exc, tb):
+            self.path_lbl.configure(text="")
+            self.dicomdir_btn.configure(state="normal")
+            self.log.set_text(f"[ERROR] {exc}")
+
+        run_threaded(self, work, done, err)
 
     def _reload_for_conf(self) -> None:
         if self._path is not None:
@@ -796,6 +861,110 @@ class DumpPanel(_DropSourceMixin, ToolPanel):
                     self.log.write(f"Saved {len(res.rows):,} rows to {out}")
 
         self.runner.run(total, "dump", worker, on_done=on_done,
+                        folder_totals=_folder_totals(files))
+
+
+class DicomDirPanel(_DropSourceMixin, ToolPanel):
+    title = "Make DICOMDIR"
+    description = ("Build a DICOM media file-set (DICOMDIR) from files / folders "
+                   "- a standard-conformant copy you can import as DICOM media "
+                   "into a VNA or workstation. The source files are left "
+                   "untouched.")
+    LOAD_REPLACES = False
+
+    def build(self) -> None:
+        self.files: list[Path] = []
+        self.out_dir: Path | None = None
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
+        self.log.configure(height=80)
+        self.body.grid_configure(sticky="nsew")
+        self.body.grid_columnconfigure(0, weight=1)
+        self.body.grid_rowconfigure(3, weight=1)
+
+        self._make_source("Build").grid(row=0, column=0, sticky="ew", padx=PAD,
+                                        pady=PAD)
+
+        outbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        outbar.grid(row=1, column=0, sticky="ew", padx=PAD)
+        ctk.CTkButton(outbar, text="Output folder...",
+                      command=self._pick_out).pack(side="left")
+        self.out_lbl = ctk.CTkLabel(
+            outbar, text="(you'll be asked where to create it)",
+            text_color=MUTED)
+        self.out_lbl.pack(side="left", padx=PAD)
+        ctk.CTkLabel(outbar, text="File-set ID").pack(side="left", padx=(PAD, 4))
+        self.fsid = ctk.CTkEntry(outbar, width=150)
+        self.fsid.insert(0, "DCMTOOLKIT")
+        self.fsid.pack(side="left")
+
+        btnbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        btnbar.grid(row=2, column=0, sticky="w", padx=PAD, pady=PAD)
+        self.btn = ctk.CTkButton(btnbar, text="Build DICOMDIR",
+                                 command=self._run)
+        self.btn.pack(side="left")
+        self.cancel_btn = ctk.CTkButton(btnbar, text="Cancel",
+                                        command=self._cancel, width=80,
+                                        state="disabled", fg_color="#a33",
+                                        hover_color="#c44")
+        self.cancel_btn.pack(side="left", padx=PAD)
+
+        self.runner = BatchRunner(self, verb="indexed")
+        self.runner.build(self.body).grid(row=3, column=0, sticky="nsew",
+                                          padx=PAD, pady=(0, PAD))
+
+    def _pick_out(self) -> None:
+        folder = filedialog.askdirectory(
+            title="Choose where to create the DICOMDIR file-set")
+        if folder:
+            self.out_dir = Path(folder)
+            self.out_lbl.configure(text=folder)
+
+    def _run(self) -> None:
+        if not self.files:
+            self.log.write("Add files or a folder first.")
+            return
+        files = list(self.files)
+        parent = self.out_dir
+        if parent is None:
+            picked = filedialog.askdirectory(
+                title="Choose where to create the DICOMDIR file-set")
+            if not picked:
+                return
+            parent = Path(picked)
+        out = dicomdir.unique_dir(parent, f"{files[0].parent.name or 'dicom'}"
+                                          "_fileset")
+        fsid = self.fsid.get().strip() or "DCMTOOLKIT"
+        total = len(files)
+        self.btn.configure(state="disabled")
+        self.cancel_btn.configure(state="normal")
+        self.log.write(f"--- Building DICOMDIR from {total:,} file(s) -> "
+                       f"{out} ---")
+        self._last = None
+
+        def worker():
+            self._last = dicomdir.make_dicomdir(
+                files, out, fileset_id=fsid, progress=self.progress,
+                on_item=self.runner.on_item,
+                should_cancel=lambda: self.runner.cancelled)
+            return self._last
+
+        def on_done():
+            self.btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
+            r = self._last
+            if r and r.dicomdir:
+                self.log.write(
+                    f"[SUMMARY] {r.added:,} instance(s) -> {r.patients} "
+                    f"patient(s), {r.studies} study(ies), {r.series} series; "
+                    f"{r.skipped:,} skipped"
+                    + (f", {r.custom:,} via fallback records" if r.custom
+                       else "") + ".")
+                self.log.write(f"DICOMDIR: {r.dicomdir}")
+            elif r:
+                self.log.write("No file-set written (no valid instances).")
+
+        self.runner.run(total, "dicomdir", worker, on_done=on_done,
                         folder_totals=_folder_totals(files))
 
 

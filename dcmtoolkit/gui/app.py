@@ -19,7 +19,7 @@ from ..logging_setup import setup as setup_logging
 from .panels_network import (EchoPanel, SendPanel, QueryMovePanel,
                              EchoAllPanel, RetrievePanel, StorageCommitPanel)
 from .panels_files import (TagListPanel, ModifyPanel, SplitPanel, DumpPanel,
-                           DeidentifyPanel, EnhancedPanel)
+                           DeidentifyPanel, EnhancedPanel, DicomDirPanel)
 from .panels_preview import PreviewPanel
 from .panels_compare import ComparePanel
 from .panels_edit import PatientEditPanel, StudyEditPanel, SeriesEditPanel
@@ -43,7 +43,8 @@ NAV_GROUPS = [
     ("Network", [EchoPanel, EchoAllPanel, SendPanel, QueryMovePanel,
                  RetrievePanel, StorageCommitPanel]),
     ("Files", [TagListPanel, ComparePanel, PreviewPanel, ModifyPanel,
-               SplitPanel, EnhancedPanel, DumpPanel, DeidentifyPanel, QAPanel]),
+               SplitPanel, EnhancedPanel, DumpPanel, DicomDirPanel,
+               DeidentifyPanel, QAPanel]),
     ("Edit demographics", [PatientEditPanel, StudyEditPanel, SeriesEditPanel]),
     ("Import", [Print2PACSPanel]),
     ("Modality", [ModalitySCUPanel]),
