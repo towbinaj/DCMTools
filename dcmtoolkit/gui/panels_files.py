@@ -37,7 +37,8 @@ def _folder_totals(files) -> dict:
 
 class TagListPanel(ToolPanel):
     title = "Tag Lister"
-    description = "Inspect the DICOM header of a single file."
+    description = ("Inspect a DICOM header. Drop a file, or drop/open a folder "
+                   "(subfolders are searched) to load the first DICOM found.")
 
     def build(self) -> None:
         self._rows = []        # all parsed tag rows for the loaded file
@@ -46,10 +47,14 @@ class TagListPanel(ToolPanel):
         bar = ctk.CTkFrame(self.body, border_width=2,
                            border_color=("gray60", "gray45"), corner_radius=10)
         bar.grid(row=0, column=0, sticky="ew", padx=PAD, pady=PAD)
-        ctk.CTkButton(bar, text="Open DICOM file...",
-                      command=self._open).pack(side="left", padx=6, pady=8)
+        ctk.CTkButton(bar, text="Open file...",
+                      command=self._open, width=100).pack(side="left", padx=6,
+                                                          pady=8)
+        ctk.CTkButton(bar, text="Open folder...",
+                      command=self._open_folder, width=110).pack(side="left",
+                                                                 padx=2, pady=8)
         self.drop_hint = ctk.CTkLabel(
-            bar, text="…or drag a DICOM file here", text_color=MUTED)
+            bar, text="…or drag a file or folder here", text_color=MUTED)
         self.drop_hint.pack(side="left", padx=8)
         ctk.CTkButton(bar, text="Clear", width=70, command=self._clear).pack(
             side="right", padx=6, pady=8)
@@ -127,9 +132,43 @@ class TagListPanel(ToolPanel):
         self._render()
 
     def _on_drop(self, dropped: list) -> None:
-        files = [Path(p) for p in dropped if Path(p).is_file()]
+        self._ingest([Path(p) for p in dropped])
+
+    def _ingest(self, paths: list) -> None:
+        """Load a dropped/opened DICOM. A file loads directly; a folder is
+        searched recursively (subfolders included, no DICOMDIR needed) and the
+        first DICOM found is loaded."""
+        files = [p for p in paths if p.is_file()]
         if files:
             self._load(files[0])
+            return
+        folders = [p for p in paths if p.is_dir()]
+        if not folders:
+            return
+        self.path_lbl.configure(text="Scanning folder...")
+
+        def work():
+            found: list[Path] = []
+            for d in folders:
+                found.extend(fileops.find_dicom_files(d))
+            # Prefer a real instance over a DICOMDIR index if both are present.
+            non_dir = [f for f in found if f.name.upper() != "DICOMDIR"]
+            return non_dir or found
+
+        def done(found):
+            if not found:
+                self.path_lbl.configure(text="")
+                self.log.set_text("No DICOM files found in the dropped "
+                                  "folder(s) (searched subfolders too).")
+                return
+            note = f"(1 of {len(found):,} found)" if len(found) > 1 else ""
+            self._load(found[0], note=note)
+
+        def err(exc, tb):
+            self.path_lbl.configure(text="")
+            self.log.set_text(f"[ERROR] {exc}")
+
+        run_threaded(self, work, done, err)
 
     def _clear(self) -> None:
         self._rows = []
@@ -151,13 +190,18 @@ class TagListPanel(ToolPanel):
         if p:
             self._load(Path(p))
 
+    def _open_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Select a folder of DICOM files")
+        if folder:
+            self._ingest([Path(folder)])
+
     def _reload_for_conf(self) -> None:
         if self._path is not None:
             self._load(self._path)
 
-    def _load(self, path: Path) -> None:
+    def _load(self, path: Path, note: str = "") -> None:
         self._path = path
-        self.path_lbl.configure(text=path.name)
+        self.path_lbl.configure(text=f"{path.name}  {note}".strip())
         self.log.clear()
         want_conf = bool(self.conf_chk.get())
 
