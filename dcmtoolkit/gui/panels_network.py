@@ -17,7 +17,7 @@ from ..net import scu
 from ..tools.fileops import find_dicom_files, expand_sources
 from .base import ToolPanel
 from .batch import BatchRunner
-from .theme import MUTED, mono
+from .theme import MUTED
 from .widgets import (DestinationPicker, build_drop_zone, run_threaded, PAD)
 
 
@@ -499,7 +499,11 @@ class QueryMovePanel(ToolPanel):
         movebar.grid(row=3, column=0, columnspan=4, sticky="ew", padx=PAD)
         ctk.CTkLabel(movebar, text="Move to AE:", anchor="w").grid(
             row=0, column=0, padx=(0, PAD))
-        self.dest_ae = ctk.CTkEntry(movebar, width=180)
+        # Editable dropdown: pick a configured destination's AE title, or type a
+        # custom one the source archive already knows.
+        self.dest_ae = ctk.CTkComboBox(movebar, width=200,
+                                       values=self._dest_ae_values())
+        self.dest_ae.set("")
         self.dest_ae.grid(row=0, column=1, sticky="w")
         self.move_btn = ctk.CTkButton(movebar, text="Move selected studies",
                                       command=self._move, state="disabled")
@@ -528,10 +532,18 @@ class QueryMovePanel(ToolPanel):
         self.results.grid_columnconfigure(0, weight=1)
         self._matches = []
         self._check_vars: list[ctk.BooleanVar] = []
+        self._row_font = ctk.CTkFont(size=13)
         self._render_results()
+
+    def _dest_ae_values(self) -> list[str]:
+        """Distinct AE titles from configured destinations (HL7/MLLP endpoints
+        have none, so they drop out naturally)."""
+        aes = {n.aetitle for n in self.app.destinations if n.aetitle}
+        return sorted(aes, key=str.lower)
 
     def on_destinations_changed(self) -> None:
         self.picker.refresh()
+        self.dest_ae.configure(values=self._dest_ae_values())
 
     # -- results list ----------------------------------------------------
     def _render_results(self) -> None:
@@ -552,9 +564,9 @@ class QueryMovePanel(ToolPanel):
             # Labels carry patient name/ID (PHI) - shown on screen only, never
             # written to the mirrored log file.
             ctk.CTkCheckBox(self.results, text=_study_label(ds),
-                            variable=var, font=mono(11),
+                            variable=var, font=self._row_font,
                             command=self._update_count).grid(
-                row=i, column=0, sticky="w", padx=4, pady=1)
+                row=i, column=0, sticky="w", padx=4, pady=2)
         self.select_all.configure(state="normal")
         self._update_count()
 
