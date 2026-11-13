@@ -17,7 +17,7 @@ from ..net import scu
 from ..tools.fileops import find_dicom_files, expand_sources
 from .base import ToolPanel
 from .batch import BatchRunner
-from .theme import MUTED
+from .theme import MUTED, mono
 from .widgets import (DestinationPicker, build_drop_zone, run_threaded, PAD)
 
 
@@ -501,19 +501,80 @@ class QueryMovePanel(ToolPanel):
             row=0, column=0, padx=(0, PAD))
         self.dest_ae = ctk.CTkEntry(movebar, width=180)
         self.dest_ae.grid(row=0, column=1, sticky="w")
-        self.move_btn = ctk.CTkButton(movebar, text="Move selected study",
+        self.move_btn = ctk.CTkButton(movebar, text="Move selected studies",
                                       command=self._move, state="disabled")
         self.move_btn.grid(row=0, column=2, padx=PAD)
 
-        # Results
-        self.results = ctk.CTkOptionMenu(self.body, values=["(no results)"],
-                                         width=560)
-        self.results.grid(row=4, column=0, columnspan=4, sticky="ew",
+        # Selection controls (above the list so they're always visible)
+        selbar = ctk.CTkFrame(self.body, fg_color="transparent")
+        selbar.grid(row=4, column=0, columnspan=4, sticky="ew", padx=PAD,
+                    pady=(PAD, 0))
+        self._all_var = ctk.BooleanVar(value=False)
+        self.select_all = ctk.CTkCheckBox(selbar, text="Select all",
+                                          variable=self._all_var,
+                                          command=self._toggle_all,
+                                          state="disabled")
+        self.select_all.pack(side="left")
+        self.sel_count = ctk.CTkLabel(selbar, text="", text_color=MUTED)
+        self.sel_count.pack(side="left", padx=PAD)
+
+        # Results: an inline scrollable list of checkboxes (not a dropdown), so
+        # several studies can be ticked and moved in one go.
+        self.results = ctk.CTkScrollableFrame(
+            self.body, height=280,
+            label_text="Query results — tick the studies to move")
+        self.results.grid(row=5, column=0, columnspan=4, sticky="ew",
                           padx=PAD, pady=PAD)
+        self.results.grid_columnconfigure(0, weight=1)
         self._matches = []
+        self._check_vars: list[ctk.BooleanVar] = []
+        self._render_results()
 
     def on_destinations_changed(self) -> None:
         self.picker.refresh()
+
+    # -- results list ----------------------------------------------------
+    def _render_results(self) -> None:
+        for w in self.results.winfo_children():
+            w.destroy()
+        self._check_vars = []
+        self._all_var.set(False)
+        if not self._matches:
+            ctk.CTkLabel(self.results, text="(no results)",
+                         text_color=MUTED).grid(sticky="w", padx=4, pady=4)
+            self.select_all.configure(state="disabled")
+            self.move_btn.configure(state="disabled")
+            self._update_count()
+            return
+        for i, ds in enumerate(self._matches):
+            var = ctk.BooleanVar(value=False)
+            self._check_vars.append(var)
+            # Labels carry patient name/ID (PHI) - shown on screen only, never
+            # written to the mirrored log file.
+            ctk.CTkCheckBox(self.results, text=_study_label(ds),
+                            variable=var, font=mono(11),
+                            command=self._update_count).grid(
+                row=i, column=0, sticky="w", padx=4, pady=1)
+        self.select_all.configure(state="normal")
+        self._update_count()
+
+    def _toggle_all(self) -> None:
+        on = self._all_var.get()
+        for var in self._check_vars:
+            var.set(on)
+        self._update_count()
+
+    def _selected_indices(self) -> list[int]:
+        return [i for i, v in enumerate(self._check_vars) if v.get()]
+
+    def _update_count(self) -> None:
+        n = len(self._selected_indices())
+        total = len(self._check_vars)
+        self.sel_count.configure(
+            text=f"{n} of {total} selected" if total else "")
+        self.move_btn.configure(state="normal" if n else "disabled")
+        # Keep the "Select all" box in sync: ticked only when every row is.
+        self._all_var.set(bool(total) and n == total)
 
     def _criteria(self) -> dict[str, str]:
         c = {}
@@ -554,14 +615,7 @@ class QueryMovePanel(ToolPanel):
 
         def done(result):
             self._matches = result.datasets
-            if result.datasets:
-                labels = [_study_label(ds) for ds in result.datasets]
-                self.results.configure(values=labels)
-                self.results.set(labels[0])
-                self.move_btn.configure(state="normal")
-            else:
-                self.results.configure(values=["(no results)"])
-                self.results.set("(no results)")
+            self._render_results()
             self.log.write(f"[DONE] {result.message}")
             self.query_btn.configure(state="normal")
 
@@ -572,36 +626,59 @@ class QueryMovePanel(ToolPanel):
         run_threaded(self, work, done, err)
 
     def _move(self) -> None:
-        idx = self.results._values.index(self.results.get()) \
-            if self.results.get() in self.results._values else -1
-        if idx < 0 or idx >= len(self._matches):
-            self.log.write("Select a study to move.")
+        sel = [self._matches[i] for i in self._selected_indices()]
+        if not sel:
+            self.log.write("Select one or more studies to move.")
             return
         dest = self.dest_ae.get().strip()
         if not dest:
             self.log.write("Enter a Move-to AE title.")
             return
         node = self.picker.get_node()
+        if not node:
+            self.log.write("No source selected.")
+            return
         my_ae = self.app.settings.my_aetitle
-        ds = self._matches[idx]
-        ident = scu.build_query("STUDY",
-                                StudyInstanceUID=str(ds.StudyInstanceUID))
-        self.move_btn.configure(state="disabled")
-        self.log.write(f"--- C-MOVE study to {dest} ---")
         tls = self.app.tls_args_for(node)
+        total = len(sel)
+        self.move_btn.configure(state="disabled")
+        self.query_btn.configure(state="disabled")
+        # Study labels carry PHI, so the log records only study counts and the
+        # per-study object tallies (no patient-identifying detail).
+        self.log.write(f"--- C-MOVE {total} study(ies) to {dest} ---")
 
         def work():
-            return scu.c_move(my_ae, node, dest, ident, model="STUDY",
-                              timeout=max(node.timeout, 120),
-                              progress=self.progress, tls_args=tls)
+            agg = {"completed": 0, "failed": 0, "warning": 0, "ok": 0, "err": 0}
+            for i, ds in enumerate(sel, 1):
+                ident = scu.build_query(
+                    "STUDY", StudyInstanceUID=str(ds.StudyInstanceUID))
+                self.progress(f"[{i}/{total}] Moving study...")
+                try:
+                    res = scu.c_move(my_ae, node, dest, ident, model="STUDY",
+                                     timeout=max(node.timeout, 120),
+                                     progress=self.progress, tls_args=tls)
+                    agg["completed"] += res.completed
+                    agg["failed"] += res.failed
+                    agg["warning"] += res.warning
+                    agg["err" if res.failed else "ok"] += 1
+                    self.progress(f"[{i}/{total}] {res.message}")
+                except Exception as exc:  # noqa: BLE001
+                    agg["err"] += 1
+                    self.progress(f"[{i}/{total}] ERROR: {exc}")
+            return agg
 
-        def done(result):
-            self.log.write(f"[DONE] {result.message}")
+        def done(agg):
+            self.log.write(
+                f"[DONE] {agg['ok']} study(ies) moved, {agg['err']} with "
+                f"error(s).  Objects: completed {agg['completed']}, failed "
+                f"{agg['failed']}, warnings {agg['warning']}.")
             self.move_btn.configure(state="normal")
+            self.query_btn.configure(state="normal")
 
         def err(exc, tb):
             self.log.write(f"[ERROR] {exc}")
             self.move_btn.configure(state="normal")
+            self.query_btn.configure(state="normal")
 
         run_threaded(self, work, done, err)
 
