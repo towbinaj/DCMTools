@@ -20,6 +20,7 @@ from pynetdicom.sop_class import Verification
 from ..logging_setup import get_logger
 from ..store.naming import relative_path
 from ..store.processing import Processor, ReceiverConfig
+from ..tools.fileops import save_dicom
 
 log = get_logger("scp")
 
@@ -59,6 +60,12 @@ class StoreSCP:
         self._processor = Processor(self.cfg)
 
         ae = AE(ae_title=self.cfg.aetitle)
+        # Optional peer allowlist: if set, pynetdicom rejects an association
+        # whose calling AE title is not listed (empty = accept any caller).
+        allow = [a.strip() for a in (self.cfg.allowed_calling_aes or [])
+                 if a.strip()]
+        if allow:
+            ae.require_calling_aet = allow
         ae.add_supported_context(Verification)
         for cx in AllStoragePresentationContexts:
             ae.add_supported_context(cx.abstract_syntax)
@@ -80,13 +87,15 @@ class StoreSCP:
                 ca_file=self.cfg.tls_ca_file,
                 require_client_cert=self.cfg.require_client_cert)
 
+        bind_host = self.cfg.bind_host or "0.0.0.0"
         self._server = ae.start_server(
-            ("0.0.0.0", self.cfg.port), block=False, evt_handlers=handlers,
+            (bind_host, self.cfg.port), block=False, evt_handlers=handlers,
             ssl_context=ssl_context)
         self.stats.listening = True
         self.stats.started_at = time.time()
-        log.info("Store SCP listening on port %d as %s (TLS=%s)",
-                 self.cfg.port, self.cfg.aetitle, bool(ssl_context))
+        log.info("Store SCP listening on %s:%d as %s (TLS=%s, callers=%s)",
+                 bind_host, self.cfg.port, self.cfg.aetitle, bool(ssl_context),
+                 f"{len(allow)} allowed" if allow else "any")
         self._emit()
 
     def stop(self) -> None:
@@ -118,7 +127,7 @@ class StoreSCP:
             rel = relative_path(ds, self.cfg.folder_format)
             dest = self._save_root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
-            ds.save_as(str(dest), enforce_file_format=True)
+            save_dicom(ds, dest, enforce_file_format=True)
 
             with self._lock:
                 self.stats.received += 1

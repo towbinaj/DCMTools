@@ -40,6 +40,11 @@ class ReceiverConfig:
     port: int = 104
     save_folder: str = ""
     folder_format: str = "PATIENT"
+    # Only accept associations from these calling AE titles (empty = accept all).
+    allowed_calling_aes: list[str] = field(default_factory=list)
+    # Interface the listener binds to (default: all interfaces, as a receiver
+    # usually needs; set to 127.0.0.1 to restrict to loopback).
+    bind_host: str = "0.0.0.0"
     # TLS (secure receiver)
     tls: bool = False
     tls_cert_file: str = ""

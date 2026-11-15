@@ -117,3 +117,41 @@ def test_mpps_create_and_set():
         assert ok2 and str(store[uid].PerformedProcedureStepStatus) == "COMPLETED"
     finally:
         server.shutdown()
+
+
+def test_receiver_allowlist_rejects_unlisted_calling_ae(tmp_path):
+    # T50: with an allowlist set, the Store SCP accepts a listed calling AE and
+    # rejects an unlisted one. Bound to loopback so no firewall prompt.
+    from dcmtoolkit.net.scp import StoreSCP
+    from dcmtoolkit.store.processing import ReceiverConfig
+    cfg = ReceiverConfig(aetitle="STORESCP", port=0, bind_host="127.0.0.1",
+                         save_folder=str(tmp_path),
+                         allowed_calling_aes=["GOODAE"])
+    scp = StoreSCP(cfg)
+    scp.start()
+    try:
+        port = scp._server.server_address[1]
+        good = Node(name="r", aetitle="STORESCP", host="127.0.0.1", port=port,
+                    calling_aetitle="GOODAE", timeout=10)
+        bad = Node(name="r", aetitle="STORESCP", host="127.0.0.1", port=port,
+                   calling_aetitle="EVILAE", timeout=10)
+        assert scu.c_echo("x", good, timeout=10).success
+        assert not scu.c_echo("x", bad, timeout=10).success
+    finally:
+        scp.stop()
+
+
+def test_receiver_no_allowlist_accepts_any_caller(tmp_path):
+    from dcmtoolkit.net.scp import StoreSCP
+    from dcmtoolkit.store.processing import ReceiverConfig
+    cfg = ReceiverConfig(aetitle="STORESCP", port=0, bind_host="127.0.0.1",
+                         save_folder=str(tmp_path))      # empty allowlist
+    scp = StoreSCP(cfg)
+    scp.start()
+    try:
+        port = scp._server.server_address[1]
+        any_ae = Node(name="r", aetitle="STORESCP", host="127.0.0.1", port=port,
+                      calling_aetitle="WHOEVER", timeout=10)
+        assert scu.c_echo("x", any_ae, timeout=10).success
+    finally:
+        scp.stop()

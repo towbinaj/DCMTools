@@ -34,6 +34,7 @@ from pynetdicom.sop_class import (
 
 from ..logging_setup import get_logger
 from ..model import Node
+from ..tools.fileops import save_dicom
 
 log = get_logger("scu")
 
@@ -458,7 +459,7 @@ def c_get(my_aetitle: str, node: Node, identifier: Dataset, out_dir: Path,
         uid = getattr(ds, "SOPInstanceUID", None) or generate_uid()
         dest = out_dir / f"{uid}.dcm"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        ds.save_as(str(dest), enforce_file_format=True)
+        save_dicom(ds, dest, enforce_file_format=True)
         saved["n"] += 1
         if len(result.saved_files) < 100000:
             result.saved_files.append(str(dest))

@@ -87,6 +87,12 @@ class ReceiverPanel(ToolPanel):
         self.fmt.set(cfg.folder_format if cfg.folder_format in FORMATS
                      else "PATIENT")
         row("Folder Format", self.fmt)
+        self.allowed_aes = row(
+            "Allowed calling AEs (|..)",
+            entry("|".join(cfg.allowed_calling_aes)))
+        ctk.CTkLabel(form, text="blank = accept any calling AE title",
+                     text_color=MUTED, anchor="w").grid(
+            row=r, column=1, sticky="w", padx=PAD); r += 1
 
         # TLS (secure receiver)
         ctk.CTkLabel(form, text="TLS (secure receiver)",
@@ -238,6 +244,7 @@ class ReceiverPanel(ToolPanel):
             port=to_int(self.port.get(), 104),
             save_folder=self.save_folder.get().strip(),
             folder_format=self.fmt.get(),
+            allowed_calling_aes=_split(self.allowed_aes.get()),
             tls=bool(self.tls.get()),
             tls_cert_file=self.tls_cert.get().strip(),
             tls_key_file=self.tls_key.get().strip(),

@@ -4,9 +4,45 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict, field
+from pathlib import Path
 
 from . import paths
 from .model import Node
+
+
+# ---------------------------------------------------------------------------
+# Path portability: store file/folder paths that live inside DICOMToolkit-data/
+# as relative, so a config file handed to a teammate "just works" when their
+# data folder is elsewhere; paths outside it stay absolute. Conversion happens
+# only at the persistence boundary - the rest of the app always sees absolute
+# paths.
+# ---------------------------------------------------------------------------
+_SETTINGS_PATH_FIELDS = ("scp_save_folder", "tls_ca_file", "tls_cert_file",
+                         "tls_key_file")
+_RECEIVER_PATH_FIELDS = ("save_folder", "tls_cert_file", "tls_key_file",
+                         "tls_ca_file", "anonymize_file", "morphing_file")
+
+
+def _resolve_path(value: str) -> str:
+    """Config value -> absolute path (relative values resolve against data_dir)."""
+    if not value:
+        return value
+    p = Path(value)
+    return str(p if p.is_absolute() else (paths.data_dir() / p))
+
+
+def _storable_path(value: str) -> str:
+    """Absolute path -> the form stored on disk: relative to DICOMToolkit-data/
+    when it lives inside it (portable), otherwise left absolute."""
+    if not value:
+        return value
+    p = Path(value)
+    if p.is_absolute():
+        try:
+            return p.relative_to(paths.data_dir()).as_posix()
+        except ValueError:
+            return str(p)
+    return Path(value).as_posix()
 
 
 # ---------------------------------------------------------------------------
@@ -52,15 +88,21 @@ def load_settings() -> Settings:
     p = paths.config_path()
     if p.exists():
         try:
-            return Settings.from_dict(json.loads(p.read_text(encoding="utf-8")))
+            s = Settings.from_dict(json.loads(p.read_text(encoding="utf-8")))
+            for f in _SETTINGS_PATH_FIELDS:
+                setattr(s, f, _resolve_path(getattr(s, f)))
+            return s
         except (json.JSONDecodeError, OSError, TypeError):
             pass
     return Settings()
 
 
 def save_settings(s: Settings) -> None:
+    d = s.to_dict()
+    for f in _SETTINGS_PATH_FIELDS:
+        d[f] = _storable_path(d.get(f, ""))
     paths.config_path().write_text(
-        json.dumps(s.to_dict(), indent=2), encoding="utf-8"
+        json.dumps(d, indent=2), encoding="utf-8"
     )
 
 
@@ -102,10 +144,16 @@ def load_receiver_config():
     except (json.JSONDecodeError, OSError):
         return ReceiverConfig()
     known = {f.name for f in fields(ReceiverConfig)}
-    return ReceiverConfig(**{k: v for k, v in raw.items() if k in known})
+    cfg = ReceiverConfig(**{k: v for k, v in raw.items() if k in known})
+    for f in _RECEIVER_PATH_FIELDS:
+        setattr(cfg, f, _resolve_path(getattr(cfg, f)))
+    return cfg
 
 
 def save_receiver_config(cfg) -> None:
     from dataclasses import asdict
+    d = asdict(cfg)
+    for f in _RECEIVER_PATH_FIELDS:
+        d[f] = _storable_path(d.get(f, ""))
     receiver_config_path().write_text(
-        json.dumps(asdict(cfg), indent=2), encoding="utf-8")
+        json.dumps(d, indent=2), encoding="utf-8")

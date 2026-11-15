@@ -18,6 +18,7 @@ from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from ..logging_setup import get_logger
 from ..model import SeriesInfo, StudyContext
+from ..tools.fileops import save_dicom
 
 log = get_logger("sc_import")
 
@@ -333,6 +334,6 @@ def save_datasets(datasets: list[FileDataset], out_dir: str | Path) -> list[Path
     written: list[Path] = []
     for ds in datasets:
         dest = out_dir / f"{ds.SOPInstanceUID}.dcm"
-        ds.save_as(str(dest), enforce_file_format=True)
+        save_dicom(ds, dest, enforce_file_format=True)
         written.append(dest)
     return written
