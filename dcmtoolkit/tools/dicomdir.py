@@ -218,6 +218,9 @@ def make_dicomdir(sources: Iterable[Path], out_dir: Path, *,
         ok, detail = True, "added"
         try:
             ds = dcmread(str(f), force=True)
+            # Neutralize the 128-byte preamble so a DICOM-as-PE polyglot
+            # (CVE-2019-11687) can't be copied into the media file-set.
+            ds.preamble = b"\x00" * 128
             for req in ("SOPInstanceUID", "SOPClassUID",
                         "StudyInstanceUID", "SeriesInstanceUID"):
                 if req not in ds or not ds.get(req):

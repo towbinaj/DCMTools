@@ -99,6 +99,12 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
             for kw in _FIELDS:
                 v = ds.get(kw)
                 rec[kw] = "" if v is None else str(v)
+            # Non-zero 128-byte preamble => possible DICOM-as-PE polyglot
+            # (CVE-2019-11687). A conformant file's preamble is all zeros.
+            pre = getattr(ds, "preamble", None)
+            if pre and any(pre):
+                rec["__preamble"] = ("an MZ/PE executable header"
+                                     if pre[:2] == b"MZ" else "non-zero data")
             # DICOMDIR and other Media Storage Directory files are not image
             # instances - exclude them from the instance-level checks.
             fm = getattr(ds, "file_meta", None)
@@ -155,6 +161,18 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
                 findings.append(Finding(
                     "abnormal", f"{Path(r['__file']).name}: {kw} invalid",
                     f"{kw} = {val!r}  ->  {msg}"))
+
+    # non-zero file preamble (possible DICOM-as-PE polyglot)
+    for r in good:
+        pp = r.get("__preamble")
+        if pp:
+            name = Path(r["__file"]).name
+            findings.append(Finding(
+                "security", f"{name}: non-zero file preamble",
+                f"The 128-byte preamble contains {pp} - a possible DICOM/PE "
+                "polyglot (CVE-2019-11687). Re-save it through any of this "
+                "toolkit's file tools (Modify, De-identify, ...) to zero the "
+                "preamble and neutralize it."))
 
     # IOD conformance (dicom-validator) - only when requested
     for r in good:

@@ -28,7 +28,7 @@ from pydicom.uid import generate_uid, PYDICOM_IMPLEMENTATION_UID
 _INSTACK_TAG = Tag(0x0020, 0x9057)   # InStackPositionNumber
 
 from ..logging_setup import get_logger
-from .fileops import _run_pool
+from .fileops import _run_pool, save_dicom
 
 log = get_logger("enhanced")
 
@@ -301,8 +301,8 @@ def convert_file(src: Path, out_dir: Path, *, new_series: bool = True,
             fm.ImplementationClassUID = PYDICOM_IMPLEMENTATION_UID
             fds.file_meta = fm
 
-            fds.save_as(str(series_dir / f"{inst_no:04d}.dcm"),
-                        enforce_file_format=True)
+            save_dicom(fds, series_dir / f"{inst_no:04d}.dcm",
+                       enforce_file_format=True)
             written += 1
 
     return written, len(group_keys), f"{written} frame(s) -> {len(group_keys)} series"

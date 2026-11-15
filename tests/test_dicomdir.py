@@ -197,3 +197,22 @@ def test_cancel_before_write_writes_nothing(tmp_path):
     res = dicomdir.make_dicomdir([src], out, should_cancel=lambda: True)
     assert res.dicomdir is None
     assert not (out / "DICOMDIR").exists()
+
+
+def test_dicomdir_neutralizes_polyglot_preamble(tmp_path):
+    # A DICOM/PE polyglot (CVE-2019-11687) must not survive into the file-set.
+    src = tmp_path / "src"
+    src.mkdir()
+    ds = make_ct()
+    ds.preamble = b"MZ" + b"\x90" * 126
+    ds.save_as(str(src / "evil.dcm"), enforce_file_format=True)
+    out = tmp_path / "out"
+
+    res = dicomdir.make_dicomdir([src], out)
+    assert res.added == 1
+
+    copied = [p for p in out.rglob("*") if p.is_file() and p.name != "DICOMDIR"]
+    assert copied
+    for p in copied:
+        with open(p, "rb") as f:
+            assert f.read(128) == b"\x00" * 128, p

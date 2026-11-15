@@ -33,6 +33,23 @@ def _noop(_: str) -> None:
     pass
 
 
+_ZERO_PREAMBLE = b"\x00" * 128
+
+
+def save_dicom(ds: Dataset, dest, **kwargs) -> None:
+    """Write ``ds`` with the 128-byte file preamble zeroed.
+
+    That unused preamble region is the vehicle for the DICOM-as-PE polyglot
+    (CVE-2019-11687): a file that is simultaneously a valid ``.dcm`` and a
+    runnable Windows ``.exe``. pydicom preserves the *source* preamble across a
+    read / modify / write, so a tool that re-saves a dropped object would carry
+    an embedded executable header straight through. Zeroing it here means no
+    file this toolkit writes can double as a launchable binary.
+    """
+    ds.preamble = _ZERO_PREAMBLE
+    ds.save_as(str(dest), **kwargs)
+
+
 def _run_pool(files, fn, workers: int, stop: dict) -> None:
     """Run ``fn(file)`` over files, sequentially or across a thread pool.
 
@@ -276,7 +293,7 @@ def modify_files(files: Iterable[Path], ops: list[ModifyOp],
                 base = out_dir or (f.parent / "modified")
                 base.mkdir(parents=True, exist_ok=True)
                 dest = base / f.name
-            ds.save_as(str(dest))
+            save_dicom(ds, dest)
             ok = True
             with lock:
                 result.changed += 1
@@ -357,7 +374,7 @@ def split_multiframe(files: Iterable[Path], out_dir: Path,
                             frame.SOPInstanceUID
                     frame.PixelData = pixels[frame_idx].tobytes()
                     dest = out_dir / f"{stem}_frame{frame_idx + 1:04d}.dcm"
-                    frame.save_as(str(dest))
+                    save_dicom(frame, dest)
                     with lock:
                         result.frames_written += 1
                 with lock:
@@ -524,7 +541,7 @@ def deidentify_files(files: Iterable[Path], cfg, out_dir: Path,
                     dest = dest.with_stem(dest.stem + "_1")
                 used.add(dest)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            ds.save_as(str(dest), enforce_file_format=True)
+            save_dicom(ds, dest, enforce_file_format=True)
             ok, detail = True, dest.name
             with lock:
                 result.written += 1

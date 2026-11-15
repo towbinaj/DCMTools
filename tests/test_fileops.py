@@ -75,3 +75,41 @@ def test_split_multiframe(tmp_path):
     assert len(frames) == 3
     for f in frames:
         assert int(getattr(dcmread(f, force=True), "NumberOfFrames", 1)) == 1
+
+
+# --- CVE-2019-11687 (DICOM-as-PE polyglot): tools must zero the preamble ------
+
+def _evil_preamble() -> bytes:
+    return b"MZ" + b"\x90" * 126        # fake DOS/PE header in the 128 bytes
+
+
+def _read_preamble(path) -> bytes:
+    with open(path, "rb") as f:
+        return f.read(128)
+
+
+def test_save_dicom_zeros_a_malicious_preamble(tmp_path):
+    ds = make_ct()
+    ds.preamble = _evil_preamble()
+    out = tmp_path / "x.dcm"
+    fileops.save_dicom(ds, out, enforce_file_format=True)
+    assert _read_preamble(out) == b"\x00" * 128
+
+
+def test_modify_strips_polyglot_preamble(tmp_path):
+    # An input file that is both valid DICOM and carries a PE header...
+    ds = make_ct()
+    ds.preamble = _evil_preamble()
+    src = tmp_path / "evil.dcm"
+    ds.save_as(str(src), enforce_file_format=True)
+    assert _read_preamble(src)[:2] == b"MZ"
+
+    out = tmp_path / "out"
+    res = fileops.modify_files(
+        [src], [fileops.ModifyOp(tag="00100010", action="set", value="X^Y")],
+        out_dir=out)
+    assert res.changed == 1
+    # ...must come out neutralized (preamble zeroed), no longer a polyglot.
+    written = out / "evil.dcm"
+    assert _read_preamble(written) == b"\x00" * 128
+    assert str(dcmread(str(written)).PatientName) == "X^Y"

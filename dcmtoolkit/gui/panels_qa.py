@@ -25,9 +25,10 @@ _CAT_COLOR = {
     "conformance": "#7b8ce0",
     "transfer": "#4aa3a0",
     "render": "#c97ba8",
+    "security": "#d9695f",
 }
 _CATEGORIES = ["All", "incongruent", "abnormal", "missing", "duplicate",
-               "mismatch", "conformance", "transfer", "render"]
+               "mismatch", "conformance", "transfer", "render", "security"]
 
 
 class QAPanel(_DropSourceMixin, ToolPanel):
@@ -102,7 +103,9 @@ class QAPanel(_DropSourceMixin, ToolPanel):
         "  conformance - IOD conformance violations (codes below)\n"
         "  transfer    - transfer-syntax / SOP-class mix, and C-STORE "
         "send-ability failures\n"
-        "  render      - pixel data won't decode / display\n\n"
+        "  render      - pixel data won't decode / display\n"
+        "  security    - non-zero file preamble (possible DICOM/PE polyglot, "
+        "CVE-2019-11687)\n\n"
         "IOD conformance violation codes (vs Type 1/1C/2/2C/3 rules):\n"
         "  TagMissing          - a required attribute is absent\n"
         "  TagEmpty            - a Type-1/1C attribute is present but empty\n"

@@ -140,3 +140,18 @@ def test_conformance_issues_structured():
     assert note == ""
     assert per_tag.get(0x00101000) == "TagUnexpected"
     assert isinstance(missing, list)
+
+
+def test_flags_non_zero_preamble_as_security(tmp_path):
+    # A conformant file (zeroed preamble) raises no security finding...
+    save(make_ct(), tmp_path / "ok.dcm")
+    # ...a DICOM/PE polyglot (non-zero preamble) must be flagged.
+    ds = make_ct()
+    ds.preamble = b"MZ" + b"\x90" * 126
+    ds.save_as(str(tmp_path / "evil.dcm"), enforce_file_format=True)
+
+    res = qa.qa_scan([tmp_path / "ok.dcm", tmp_path / "evil.dcm"])
+    sec = [f for f in res.findings if f.category == "security"]
+    assert len(sec) == 1
+    assert "evil.dcm" in sec[0].summary
+    assert "MZ/PE" in sec[0].detail

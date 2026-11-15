@@ -17,7 +17,7 @@ from pathlib import Path
 from pydicom import dcmread
 from pydicom.uid import generate_uid
 
-from .fileops import _run_pool
+from .fileops import _run_pool, save_dicom
 
 # Worklist-item keys copied onto every image of the exam.
 _PATIENT_KEYS = ["PatientName", "PatientID", "PatientBirthDate", "PatientSex"]
@@ -107,7 +107,7 @@ def stamp_exam(files, item: dict, out_dir: Path, *, store_ae: str = "",
                 fm.MediaStorageSOPInstanceUID = sop_inst
 
             dest = out_dir / f"{sop_inst}.dcm"
-            ds.save_as(str(dest), enforce_file_format=True)
+            save_dicom(ds, dest, enforce_file_format=True)
 
             with lock:
                 series_info[new_series]["refs"].append((sop_class, sop_inst))
