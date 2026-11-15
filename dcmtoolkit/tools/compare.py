@@ -19,6 +19,20 @@ from .fileops import find_dicom_files, expand_sources
 _PIXEL = Tag(0x7FE0, 0x0010)
 
 
+def csv_safe(value) -> str:
+    """Neutralise spreadsheet formula injection for a CSV cell.
+
+    A tag value from an outside DICOM file can start with ``=``, ``+``, ``-``,
+    ``@`` (or a leading tab / CR), which Excel and other spreadsheets evaluate
+    as a formula on open. Prefix any such value with an apostrophe so it is
+    shown literally. Empty / plain values are returned unchanged.
+    """
+    s = "" if value is None else str(value)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
+
+
 @dataclass
 class DiffRow:
     tag: str          # "(gggg,eeee)"

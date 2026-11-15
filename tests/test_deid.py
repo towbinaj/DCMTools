@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydicom.uid import generate_uid
+import numpy as np
+import pytest
+from pydicom.uid import generate_uid, RLELossless
 
 from dcmtoolkit.store.processing import ReceiverConfig, Processor
 from conftest import make_ct
@@ -58,6 +60,47 @@ def test_retain_dates_keeps_study_date_but_not_birthdate():
     assert str(ds.StudyDate) == "20200101"            # retained
     # birth date is de-identified (replaced with a dummy), not the real value
     assert str(getattr(ds, "PatientBirthDate", "")) != "19800101"
+
+
+def _nonzero_ct():
+    """An uncompressed CT whose every pixel is 100 (so blanking is visible)."""
+    ds = make_ct()
+    arr = np.full((ds.Rows, ds.Columns), 100, dtype=np.uint16)
+    ds.PixelData = arr.tobytes()
+    return ds
+
+
+def test_pixel_blanking_top_rows_uncompressed():
+    cfg = ReceiverConfig(remove_image_top=50)   # blank the top half
+    out = Processor(cfg).process(_nonzero_ct())
+    arr = out.pixel_array
+    assert (arr[:2, :] == 0).all()              # top 2 of 4 rows blanked
+    assert (arr[2:, :] == 100).all()            # the rest untouched
+
+
+def test_pixel_blanking_blanks_compressed_image():
+    # Regression (assessment F01/T24): burned-in PHI must be blanked even when
+    # the image is compressed - the blanking must not be silently skipped.
+    ds = _nonzero_ct()
+    ds.compress(RLELossless)
+    assert ds.file_meta.TransferSyntaxUID == RLELossless
+
+    out = Processor(ReceiverConfig(remove_image_top=50)).process(ds)
+
+    # Decoded to uncompressed and the top rows are actually zeroed.
+    assert not out.file_meta.TransferSyntaxUID.is_compressed
+    arr = out.pixel_array
+    assert (arr[:2, :] == 0).all()
+    assert (arr[2:, :] == 100).all()
+
+
+def test_pixel_blanking_fails_closed_when_pixels_unreadable():
+    # If blanking is requested but the pixels can't be processed, the object is
+    # refused (ValueError) rather than forwarded with burned-in PHI intact.
+    ds = make_ct()
+    ds.PixelData = b"\x00\x00"                   # too short for Rows*Columns
+    with pytest.raises(ValueError):
+        Processor(ReceiverConfig(remove_image_top=50)).process(ds)
 
 
 def test_morph_from_csv_crosswalk(tmp_path):

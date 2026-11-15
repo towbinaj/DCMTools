@@ -71,3 +71,17 @@ def test_load_side_flags_multiple_series(tmp_path):
          tmp_path / "b.dcm")
     _, summ = compare.load_side([tmp_path], mode="series", label="A")
     assert summ.series == 2 and "representative" in summ.note
+
+
+def test_csv_safe_neutralises_formula_injection():
+    # Assessment F13/T26: tag values written to CSV must not be evaluated as
+    # spreadsheet formulas. Risky leading characters get an apostrophe prefix.
+    for payload in ("=cmd|' /c calc'!A1", "+1+2", "-2+3", "@SUM(A1)",
+                    "\ttabbed", "\rcarriage"):
+        assert compare.csv_safe(payload) == "'" + payload
+    # Ordinary values (and empties) are returned unchanged.
+    assert compare.csv_safe("DOE^JANE") == "DOE^JANE"
+    assert compare.csv_safe("20200101") == "20200101"
+    assert compare.csv_safe("") == ""
+    assert compare.csv_safe(None) == ""
+    assert compare.csv_safe(42) == "42"

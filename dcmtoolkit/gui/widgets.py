@@ -44,6 +44,19 @@ class LogBox(ctk.CTkTextbox):
                 if line.strip():
                     self._logger.info(line)
 
+    def append_private(self, message: str) -> None:
+        """Append a line to the on-screen box WITHOUT mirroring to the central
+        log file.
+
+        Use for lines that may carry tag values (PHI) - e.g. a patient-name
+        query the operator typed - so they stay on screen but never land in the
+        persistent, rotating log file.
+        """
+        self.configure(state="normal")
+        self.insert("end", message + "\n")
+        self.see("end")
+        self.configure(state="disabled")
+
     def clear(self) -> None:
         self.configure(state="normal")
         self.delete("1.0", "end")

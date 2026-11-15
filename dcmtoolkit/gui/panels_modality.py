@@ -366,10 +366,13 @@ class ModalitySCUPanel(ToolPanel):
 
         self.perform_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.log.write(f"=== Perform exam: {item.get('PatientName','?')} / "
-                       f"{item.get('AccessionNumber','?')} "
-                       f"(MPPS={'on' if do_mpps else 'off'}, "
+        # Keep an audit line (no PHI) in the log file; show the patient /
+        # accession on screen only.
+        self.log.write(f"=== Perform exam (MPPS={'on' if do_mpps else 'off'}, "
                        f"store={'on' if do_store else 'off'}) ===")
+        self.log.append_private(
+            f"    Patient: {item.get('PatientName','?')} / "
+            f"Acc {item.get('AccessionNumber','?')}")
 
         stamp_dir = paths.data_dir() / "exams" / (
             (item.get("AccessionNumber") or "exam") + "_" +

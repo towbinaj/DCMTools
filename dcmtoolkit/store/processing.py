@@ -386,13 +386,19 @@ class Processor:
         try:
             ts = ds.file_meta.TransferSyntaxUID
             if ts.is_compressed:
-                log.warning("Cannot blank pixels of compressed image %s",
-                            getattr(ds, "SOPInstanceUID", "?"))
-                return
+                # Burned-in PHI must be blanked even in compressed images:
+                # decode to uncompressed pixels so the blanking below applies
+                # (the object is then saved uncompressed).
+                ds.decompress()
             arr = ds.pixel_array
         except Exception as exc:  # noqa: BLE001
-            log.warning("Pixel blanking skipped: %s", exc)
-            return
+            # Fail closed: blanking was requested but the pixels could not be
+            # touched, so refuse the object rather than forward it with the
+            # burned-in PHI possibly intact.
+            raise ValueError(
+                "Pixel blanking required but the image could not be processed "
+                f"({exc}); refusing to forward it with burned-in PHI possibly "
+                "intact") from exc
 
         rows = arr.shape[-2] if arr.ndim >= 2 else 0
         cols = arr.shape[-1] if arr.ndim >= 2 else 0

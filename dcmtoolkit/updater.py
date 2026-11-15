@@ -19,6 +19,7 @@ import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import __version__
 from .logging_setup import get_logger
@@ -41,6 +42,25 @@ class UpdateInfo:
     size: int
     sha256_url: str | None
     notes: str
+
+
+def _is_github_https(url: str) -> bool:
+    """True only for an ``https://`` URL on a GitHub-owned host.
+
+    Release assets live on ``github.com`` and are served (after redirects) from
+    ``*.githubusercontent.com``; the API is ``api.github.com``. Anything else -
+    a plain-``http`` link or a foreign host slipped into an API response - is
+    refused so a tampered manifest can't point the updater at attacker code.
+    """
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return False
+    if p.scheme != "https" or not p.hostname:
+        return False
+    host = p.hostname.lower()
+    return (host == "github.com" or host.endswith(".github.com")
+            or host.endswith(".githubusercontent.com"))
 
 
 def _parse_ver(s: str) -> tuple:
@@ -85,11 +105,13 @@ def check_latest(timeout: int = 15) -> UpdateInfo | None:
     size = 0
     for a in data.get("assets", []) or []:
         name = a.get("name", "")
-        if name == ASSET_NAME:
-            exe_url = a.get("browser_download_url")
+        dl = a.get("browser_download_url", "")
+        # Only trust asset URLs that are https on a GitHub host.
+        if name == ASSET_NAME and _is_github_https(dl):
+            exe_url = dl
             size = int(a.get("size", 0) or 0)
-        elif name == ASSET_NAME + ".sha256":
-            sha_url = a.get("browser_download_url")
+        elif name == ASSET_NAME + ".sha256" and _is_github_https(dl):
+            sha_url = dl
     if not exe_url:
         log.info("Release %s has no %s asset", tag, ASSET_NAME)
         return None
@@ -100,8 +122,22 @@ def check_latest(timeout: int = 15) -> UpdateInfo | None:
 
 def download(info: UpdateInfo, dest: Path, progress=None,
              timeout: int = 300) -> Path:
-    """Download the new exe to ``dest`` and verify its SHA-256 if published."""
+    """Download the new exe to ``dest`` and verify its published SHA-256.
+
+    Fails closed: the download URL (and the checksum URL) must be https on a
+    GitHub host, and a published checksum is **required** - an update with no
+    verifiable checksum is refused rather than installed unverified.
+    """
     dest = Path(dest)
+    if not _is_github_https(info.url):
+        raise ValueError(f"Refusing non-GitHub/HTTPS download URL: {info.url}")
+    if not info.sha256_url:
+        raise ValueError(
+            "No published SHA-256 checksum for this release - refusing to "
+            "install an unverified update.")
+    if not _is_github_https(info.sha256_url):
+        raise ValueError(
+            f"Refusing non-GitHub/HTTPS checksum URL: {info.sha256_url}")
     req = urllib.request.Request(info.url, headers=_HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as r, open(dest, "wb") as f:
         total = int(r.headers.get("Content-Length", info.size or 0) or 0)
@@ -114,16 +150,11 @@ def download(info: UpdateInfo, dest: Path, progress=None,
             done += len(chunk)
             if progress and total:
                 progress(done / total)
-    if info.sha256_url:
-        try:
-            expected = _get(info.sha256_url, 30).decode().split()[0].strip().lower()
-        except Exception:  # noqa: BLE001 - TLS already protected the transport
-            expected = ""
-        if expected:
-            got = hashlib.sha256(dest.read_bytes()).hexdigest()
-            if got != expected:
-                dest.unlink(missing_ok=True)
-                raise ValueError("SHA-256 mismatch - download rejected")
+    expected = _get(info.sha256_url, 30).decode().split()[0].strip().lower()
+    got = hashlib.sha256(dest.read_bytes()).hexdigest()
+    if got != expected:
+        dest.unlink(missing_ok=True)
+        raise ValueError("SHA-256 mismatch - download rejected")
     return dest
 
 

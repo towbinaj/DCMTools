@@ -295,7 +295,10 @@ class ComparePanel(ToolPanel):
                 w = csv.writer(f)
                 w.writerow(["status", "class", "tag", "keyword", "A", "B"])
                 for r in self._diff:
-                    w.writerow([r.status, r.cls, r.tag, r.keyword, r.a, r.b])
+                    # Values come from arbitrary DICOM files; neutralise any
+                    # spreadsheet formula-injection payloads before writing.
+                    w.writerow([r.status, r.cls, r.tag, r.keyword,
+                                compare.csv_safe(r.a), compare.csv_safe(r.b)])
         except OSError as exc:
             messagebox.showerror("Compare", f"Export failed:\n{exc}", parent=self)
             return

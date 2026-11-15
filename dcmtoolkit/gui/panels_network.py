@@ -596,7 +596,8 @@ class QueryMovePanel(ToolPanel):
                 val = _name_for_query(val)
             c[key] = val
         if c.get("PatientName"):
-            self.log.write(f"Patient Name query: {c['PatientName']}")
+            # Name is PHI: show it on screen only, never mirror it to the log.
+            self.log.append_private(f"Patient Name query: {c['PatientName']}")
         return c
 
     def _query(self) -> None:
@@ -777,7 +778,9 @@ class RetrievePanel(ToolPanel):
         # Make a plain surname forgiving (smith -> smith*), same as Query/Move.
         criteria["PatientName"] = _name_for_query(criteria.get("PatientName", ""))
         if criteria["PatientName"]:
-            self.log.write(f"Patient Name query: {criteria['PatientName']}")
+            # Name is PHI: show it on screen only, never mirror it to the log.
+            self.log.append_private(
+                f"Patient Name query: {criteria['PatientName']}")
         # PatientName now comes through **criteria (empty -> universal return key).
         ident = scu.build_query("STUDY", StudyInstanceUID="",
                                 StudyDescription="",
