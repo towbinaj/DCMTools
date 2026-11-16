@@ -68,6 +68,11 @@ class ReceiverConfig:
     remove_image_top_modality: list[str] = field(default_factory=list)
     remove_image_left: int = 0
     remove_image_left_modality: list[str] = field(default_factory=list)
+    # Fail closed on burned-in PHI: if an object declares BurnedInAnnotation=YES
+    # but no pixel-blanking region is set, refuse it rather than pass it through
+    # a de-identification that leaves the burned-in text intact. Set True to
+    # override when the burned-in content is known to be non-PHI.
+    allow_burned_in: bool = False
     # [MORPH] crosswalk: first format tag is the lookup key, the rest are
     # overwritten from the matching crosswalk row (CSV or pipe-delimited).
     morph_tags: bool = False
@@ -195,6 +200,10 @@ class Processor:
         # before anything runs to preserve the patient's age.
         date_plan = (self._compute_date_plan(ds)
                      if self.cfg.calculated_dates else None)
+        # Read the burned-in flag up front: the Basic Profile below may drop the
+        # BurnedInAnnotation attribute, yet the guard still needs to know it.
+        burned_in = (str(getattr(ds, "BurnedInAnnotation", "") or "")
+                     .strip().upper() == "YES")
         if self.cfg.basic_profile:
             self._apply_basic_profile(ds)
         if self.cfg.morph_tags:
@@ -211,7 +220,9 @@ class Processor:
             self._remap_uids(ds)
         if date_plan is not None:
             self._apply_date_plan(ds, date_plan)
-        self._apply_pixel_blanking(ds)
+        blanked = self._apply_pixel_blanking(ds)
+        if not blanked:
+            self._guard_burned_in(burned_in)
         # Neutralize the 128-byte preamble: it is the carrier for a DICOM-as-PE
         # polyglot (CVE-2019-11687), and a de-identified object must not ship an
         # embedded executable. Done in the engine itself so every caller is
@@ -377,7 +388,27 @@ class Processor:
                 else:
                     ds.add_new(tag, "LO", row[i])
 
-    def _apply_pixel_blanking(self, ds: Dataset) -> None:
+    def _guard_burned_in(self, burned_in: bool) -> None:
+        """Fail closed when an object declares burned-in annotation but no pixel
+        region was blanked. BurnedInAnnotation=YES means patient text may be
+        painted into the pixels, which the attribute de-identification does not
+        touch; forwarding it would leak PHI. The operator's remedy is to set a
+        Remove-Image region, or to enable ``allow_burned_in`` when the burned-in
+        content is known to be non-PHI (a scale bar, laterality marker, etc.).
+
+        The flag only states that *something* is burned in - it cannot tell PHI
+        from benign annotation - so this is a tripwire, not a detector.
+        """
+        if burned_in and not self.cfg.allow_burned_in:
+            raise ValueError(
+                "Object declares BurnedInAnnotation=YES but no pixel-blanking "
+                "region is configured; refusing to de-identify it with burned-in "
+                "text possibly intact. Set a Remove-Image Top/Left region, or "
+                "enable 'allow burned-in' if the annotation is known non-PHI.")
+
+    def _apply_pixel_blanking(self, ds: Dataset) -> bool:
+        """Blank the configured Remove-Image region(s). Returns True if a region
+        was blanked, False if none was configured for this object."""
         top = self.cfg.remove_image_top
         left = self.cfg.remove_image_left
         if top <= 0 and left <= 0:
@@ -392,7 +423,7 @@ class Processor:
                                 [m.upper() for m in
                                  self.cfg.remove_image_left_modality])
         if not (do_top or do_left):
-            return
+            return False
         try:
             ts = ds.file_meta.TransferSyntaxUID
             if ts.is_compressed:
@@ -423,3 +454,4 @@ class Processor:
             n = max(1, int(cols * left / 100))
             arr[..., :, :n] = 0
         ds.PixelData = arr.tobytes()
+        return True

@@ -50,6 +50,34 @@ def test_deidentify_neutralizes_polyglot_preamble():
     assert out.preamble == b"\x00" * 128
 
 
+def test_burned_in_guard_fails_closed(tmp_path):
+    # F01: an object that declares burned-in annotation but has no blanking
+    # region configured must be refused, not silently de-identified and passed on.
+    ds = _phi_ct(generate_uid())
+    ds.BurnedInAnnotation = "YES"
+    import pytest
+    with pytest.raises(ValueError, match="BurnedInAnnotation"):
+        Processor(ReceiverConfig(basic_profile=True)).process(ds)
+
+
+def test_burned_in_guard_override_allows():
+    # With the explicit override, a known-non-PHI annotated object passes through.
+    ds = _phi_ct(generate_uid())
+    ds.BurnedInAnnotation = "YES"
+    out = Processor(ReceiverConfig(basic_profile=True,
+                                   allow_burned_in=True)).process(ds)
+    assert str(out.PatientName) == ""      # still de-identified
+
+
+def test_burned_in_guard_not_triggered_when_blanking_set():
+    # If a blanking region IS configured the guard does not fire (blanking runs).
+    ds = _phi_ct(generate_uid())
+    ds.BurnedInAnnotation = "YES"
+    out = Processor(ReceiverConfig(basic_profile=True,
+                                   remove_image_top=10)).process(ds)
+    assert str(out.PatientName) == ""
+
+
 def test_basic_profile_uids_consistent_across_study():
     study = generate_uid()
     proc = Processor(ReceiverConfig(basic_profile=True))

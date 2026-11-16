@@ -1070,6 +1070,9 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
         self.img_top_mod = row("  ...top modalities", entry())
         self.img_left = row("Remove Image Left %", entry(80))
         self.img_left_mod = row("  ...left modalities", entry())
+        self.allow_burned_in = ctk.CTkCheckBox(
+            form, text="Allow burned-in (skip the BurnedInAnnotation=YES guard)")
+        row("", self.allow_burned_in)
         # Morphing: map tag values per-object from a crosswalk file.
         self._morph_targets = []        # [(hex, keyword)]
         common = [""] + dicomtags.common_tag_labels()
@@ -1280,6 +1283,7 @@ class DeidentifyPanel(_DropSourceMixin, ToolPanel):
             remove_image_top_modality=_split(self.img_top_mod.get()),
             remove_image_left=to_int(self.img_left.get(), 0),
             remove_image_left_modality=_split(self.img_left_mod.get()),
+            allow_burned_in=bool(self.allow_burned_in.get()),
             morph_tags=bool(self.morph_tags.get()),
             morphing_file_format=self._morph_format(),
             morphing_file=self.morph_file.get().strip(),
