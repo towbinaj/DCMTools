@@ -8,7 +8,6 @@ dropdown, so co-mingled exports can be compared series-by-series.
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -291,14 +290,10 @@ class ComparePanel(ToolPanel):
         if not path:
             return
         try:
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(["status", "class", "tag", "keyword", "A", "B"])
-                for r in self._diff:
-                    # Values come from arbitrary DICOM files; neutralise any
-                    # spreadsheet formula-injection payloads before writing.
-                    w.writerow([r.status, r.cls, r.tag, r.keyword,
-                                compare.csv_safe(r.a), compare.csv_safe(r.b)])
+            # Single escaped export path (engine-owned); values come from
+            # arbitrary DICOM files, so every cell is neutralised there against
+            # spreadsheet formula injection.
+            compare.write_csv(self._diff, path)
         except OSError as exc:
             messagebox.showerror("Compare", f"Export failed:\n{exc}", parent=self)
             return

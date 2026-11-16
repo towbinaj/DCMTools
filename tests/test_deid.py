@@ -41,6 +41,15 @@ def test_basic_profile_removes_phi_and_private():
     assert ds.DeidentificationMethodCodeSequence[0].CodeValue == "113100"
 
 
+def test_deidentify_neutralizes_polyglot_preamble():
+    # A de-identified object must not carry a DICOM-as-PE polyglot preamble
+    # (CVE-2019-11687), even when driven through the engine directly.
+    ds = _phi_ct(generate_uid())
+    ds.preamble = b"MZ" + b"\x90" * 126          # PE/DOS executable header
+    out = Processor(ReceiverConfig(basic_profile=True)).process(ds)
+    assert out.preamble == b"\x00" * 128
+
+
 def test_basic_profile_uids_consistent_across_study():
     study = generate_uid()
     proc = Processor(ReceiverConfig(basic_profile=True))

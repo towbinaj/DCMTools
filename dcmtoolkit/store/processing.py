@@ -212,6 +212,11 @@ class Processor:
         if date_plan is not None:
             self._apply_date_plan(ds, date_plan)
         self._apply_pixel_blanking(ds)
+        # Neutralize the 128-byte preamble: it is the carrier for a DICOM-as-PE
+        # polyglot (CVE-2019-11687), and a de-identified object must not ship an
+        # embedded executable. Done in the engine itself so every caller is
+        # covered, not just the file-write path that routes through save_dicom.
+        ds.preamble = b"\x00" * 128
         return ds
 
     # Dates/times retained under the "Retain Longitudinal Temporal Information"

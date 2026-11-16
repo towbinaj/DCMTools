@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+
 from pydicom.uid import generate_uid
 
 from dcmtoolkit.tools import compare
@@ -85,3 +87,26 @@ def test_csv_safe_neutralises_formula_injection():
     assert compare.csv_safe("") == ""
     assert compare.csv_safe(None) == ""
     assert compare.csv_safe(42) == "42"
+
+
+def test_write_csv_escapes_every_cell(tmp_path):
+    # T26: the engine CSV writer is the single export path and must neutralise
+    # formula injection in ANY column, including a crafted keyword, not just the
+    # tag values a GUI caller happens to escape.
+    rows = [
+        compare.DiffRow(tag="(0010,0010)", keyword="=EVIL()", cls="phi",
+                        a="=cmd|'/c calc'!A1", b="DOE^JANE", status="different"),
+    ]
+    out = tmp_path / "cmp.csv"
+    compare.write_csv(rows, out)
+
+    parsed = list(csv.reader(out.open(encoding="utf-8")))
+    assert parsed[0] == ["status", "class", "tag", "keyword", "A", "B"]
+    body = parsed[1]
+    # the crafted keyword and the risky A value are both prefixed; B is untouched
+    assert body[3] == "'=EVIL()"
+    assert body[4] == "'=cmd|'/c calc'!A1"
+    assert body[5] == "DOE^JANE"
+    # no field in the file begins with a raw formula trigger
+    for cell in body:
+        assert not cell[:1] in ("=", "+", "-", "@")

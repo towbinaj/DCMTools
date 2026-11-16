@@ -6,6 +6,7 @@ directly. Top-level attributes only (sequences shown as a summary line).
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +32,24 @@ def csv_safe(value) -> str:
     if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
         return "'" + s
     return s
+
+
+def write_csv(rows, dest, *, label_a: str = "A", label_b: str = "B") -> None:
+    """Write diff ``rows`` to ``dest`` as CSV, neutralising every cell against
+    spreadsheet formula injection.
+
+    This is the single CSV export path: the GUI and any toolkit caller share it,
+    so an unescaped comparison file cannot be produced. ``csv_safe`` is applied
+    to every column (not just the tag values) so no field - including a crafted
+    keyword - can carry a leading formula trigger.
+    """
+    header = ("status", "class", "tag", "keyword", label_a, label_b)
+    with open(dest, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow([csv_safe(h) for h in header])
+        for r in rows:
+            w.writerow([csv_safe(r.status), csv_safe(r.cls), csv_safe(r.tag),
+                        csv_safe(r.keyword), csv_safe(r.a), csv_safe(r.b)])
 
 
 @dataclass
