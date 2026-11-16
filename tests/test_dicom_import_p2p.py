@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from pydicom import dcmread
-from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from dcmtoolkit.print2pacs import dicom_import, reconcile, send
@@ -20,9 +20,13 @@ TARGET = StudyContext(
 SI = SeriesInfo(modality="OT", series_description="Re-filed", series_number=777)
 
 
-def _make_source(path, *, with_private=True, polyglot=True):
+def _make_source(path, *, with_private=True, polyglot=True, residual=False):
     """Write a minimal but valid US DICOM instance, optionally with a PE-polyglot
-    preamble (MZ header) and a private tag block, to simulate a foreign object."""
+    preamble (MZ header) and a private tag block, to simulate a foreign object.
+
+    ``residual=True`` also stamps the source patient's *secondary* identifiers
+    and sequences referencing its original study, to prove a re-file scrubs them.
+    """
     sop = generate_uid()
     fm = FileMetaDataset()
     fm.MediaStorageSOPClassUID = US_SOP
@@ -52,6 +56,20 @@ def _make_source(path, *, with_private=True, polyglot=True):
     ds.HighBit = 7
     ds.PixelRepresentation = 0
     ds.PixelData = np.arange(64, dtype=np.uint8).tobytes()
+    if residual:
+        # Secondary patient identity of the SOURCE patient.
+        ds.OtherPatientIDs = "OLD-MRN-2"
+        ds.OtherPatientNames = "OLD^ALIAS"
+        ds.IssuerOfPatientID = "OLD_ISSUER"
+        ds.PatientAddress = "1 Old Street"
+        # A reference back to the object's ORIGINAL study.
+        ref = Dataset()
+        ref.StudyInstanceUID = "1.2.999.1"
+        ds.ReferencedStudySequence = [ref]
+        req = Dataset()
+        req.AccessionNumber = "OLDACC"
+        req.StudyInstanceUID = "1.2.999.1"
+        ds.RequestAttributesSequence = [req]
     if with_private:
         block = ds.private_block(0x000b, "ACME 1.0", create=True)
         block.add_new(0x01, "LO", "sekret-blob")
@@ -105,6 +123,26 @@ def test_restamp_morphs_identity_keeps_modality_and_sop_class(tmp_path):
     assert ds.SeriesDescription == "Re-filed"
     assert ds.SOPInstanceUID != old_sop
     assert ds.file_meta.MediaStorageSOPInstanceUID == ds.SOPInstanceUID
+
+
+def test_restamp_scrubs_foreign_identity_and_stale_references(tmp_path):
+    # Source carries the OLD patient's secondary IDs and references to its
+    # original study; a re-file must not propagate any of them (T14).
+    p, _ = _make_source(tmp_path / "foreign.dcm", residual=True)
+    [ds] = dicom_import.convert_dicoms([dicom_import.load_dicom(p)], TARGET, SI)
+
+    # primary identity is the target
+    assert ds.PatientID == "NEW-001"
+    assert ds.StudyInstanceUID == "1.2.3.4.5"
+
+    # no secondary identity of the source patient survives
+    for kw in ("OtherPatientIDs", "OtherPatientNames", "IssuerOfPatientID",
+               "PatientAddress"):
+        assert not hasattr(ds, kw), f"{kw} leaked into the re-filed object"
+
+    # no dangling reference to the original study survives
+    for kw in ("ReferencedStudySequence", "RequestAttributesSequence"):
+        assert not hasattr(ds, kw), f"{kw} still references the source study"
 
 
 def test_restamp_zeros_polyglot_preamble(tmp_path):

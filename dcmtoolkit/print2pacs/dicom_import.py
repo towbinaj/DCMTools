@@ -135,6 +135,39 @@ def _ensure_valid(ds: FileDataset, name: str) -> None:
         raise NotDicom(f"{name}: missing transfer syntax; cannot re-file safely.")
 
 
+# Secondary patient-identity attributes. The primary Patient Module is
+# overwritten from the target study, but these carry the *source* patient's
+# identity and would otherwise survive a re-file onto a different patient.
+_RESIDUAL_PATIENT_IDENTITY = (
+    "OtherPatientIDs", "OtherPatientIDsSequence", "OtherPatientNames",
+    "IssuerOfPatientID", "IssuerOfPatientIDQualifiersSequence",
+    "TypeOfPatientID", "PatientBirthName", "PatientMotherBirthName",
+    "PatientAddress", "PatientTelephoneNumbers", "CountryOfResidence",
+    "RegionOfResidence", "MilitaryRank", "BranchOfService",
+    "MedicalRecordLocator", "PatientComments", "ResponsiblePerson",
+    "ResponsibleOrganization", "PatientInsurancePlanCodeSequence",
+    "PatientPrimaryLanguageCodeSequence", "ReferencedPatientSequence",
+)
+
+# Sequences that reference the object's ORIGINAL study / series / order. Once it
+# is re-filed onto a new study they are dangling or point at the foreign source,
+# so they are dropped rather than carried into the target study.
+_STALE_REFERENCE_SEQUENCES = (
+    "ReferencedStudySequence", "ReferencedSeriesSequence",
+    "ReferencedImageSequence", "ReferencedInstanceSequence",
+    "SourceImageSequence", "RelatedSeriesSequence",
+    "ReferencedPerformedProcedureStepSequence", "ReferencedRequestSequence",
+    "RequestAttributesSequence",
+    "StudiesContainingOtherReferencedInstancesSequence",
+)
+
+
+def _delete_if_present(ds: FileDataset, keywords) -> None:
+    for kw in keywords:
+        if hasattr(ds, kw):
+            delattr(ds, kw)
+
+
 def restamp(ds: FileDataset, context: StudyContext, series_info: SeriesInfo, *,
             series_uid: str, instance_number: int,
             strip_private: bool = False) -> FileDataset:
@@ -173,6 +206,12 @@ def restamp(ds: FileDataset, context: StudyContext, series_info: SeriesInfo, *,
     if series_info.body_part:
         ds.BodyPartExamined = series_info.body_part
     ds.InstanceNumber = int(instance_number)
+
+    # --- Re-file hygiene: drop the source patient's residual identity and any
+    # references to its original study/series/order so no foreign identity or
+    # dangling reference follows the object into the target study (T14). ---
+    _delete_if_present(ds, _RESIDUAL_PATIENT_IDENTITY)
+    _delete_if_present(ds, _STALE_REFERENCE_SEQUENCES)
 
     # --- Security: optionally drop opaque vendor data ---
     if strip_private:
