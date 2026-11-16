@@ -63,6 +63,29 @@ def test_modify_set_and_remove(tmp_path):
     assert "AccessionNumber" not in ds
 
 
+def test_modify_rejects_invalid_uid_value(tmp_path):
+    # T27: setting a UI-VR tag to a malformed UID must fail the item (with a
+    # reason) rather than silently write a non-conformant value.
+    p = save(make_ct(), tmp_path / "x.dcm")
+    before = dcmread(p, force=True).SOPInstanceUID
+    ops = [fileops.ModifyOp(tag="00080018", action="set",      # SOPInstanceUID
+                            value="not a valid uid!!")]
+    res = fileops.modify_files([p], ops, in_place=True)
+    assert res.changed == 0 and res.failed == 1
+    assert any("VR UI" in e for e in res.errors)
+    # the file is left untouched
+    assert dcmread(p, force=True).SOPInstanceUID == before
+
+
+def test_modify_allows_valid_value(tmp_path):
+    # Regression: a well-formed value still goes through after adding validation.
+    p = save(make_ct(), tmp_path / "x.dcm")
+    ops = [fileops.ModifyOp(tag="00100010", action="set", value="DOE^JANE")]
+    res = fileops.modify_files([p], ops, in_place=True)
+    assert res.changed == 1 and res.failed == 0
+    assert str(dcmread(p, force=True).PatientName) == "DOE^JANE"
+
+
 def test_split_multiframe(tmp_path):
     mf = make_ct()
     mf.NumberOfFrames = 3

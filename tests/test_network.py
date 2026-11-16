@@ -12,6 +12,21 @@ from dcmtoolkit.net import scu, mwl, mpps
 from conftest import make_ct, save, storage_scp
 
 
+def test_storage_commit_report_correlation():
+    # T40: a Storage-Commitment result report is accepted only when its
+    # Transaction UID matches the one we sent (guards against a forged/unrelated
+    # N-EVENT-REPORT being taken as the result).
+    ours = "1.2.3.4.5"
+    match = Dataset()
+    match.TransactionUID = ours
+    mismatch = Dataset()
+    mismatch.TransactionUID = "9.9.9.9"
+    absent = Dataset()
+    assert scu._commit_report_matches(match, ours) is True
+    assert scu._commit_report_matches(mismatch, ours) is False
+    assert scu._commit_report_matches(absent, ours) is False
+
+
 def test_c_echo_success():
     ae = AE(ae_title="ECHOSCP")
     ae.add_supported_context(Verification)

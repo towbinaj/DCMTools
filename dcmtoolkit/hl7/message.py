@@ -15,6 +15,26 @@ REQUIRED_SEGMENTS = {
 }
 
 
+# Structural delimiters that must never appear inside a single field VALUE, or
+# they would inject a new segment / field / repetition / component (HL7
+# injection). CR/LF are the dangerous ones; the encoding chars are included so a
+# programmatically-inserted value cannot forge structure either.
+_FIELD_DELIMS = ("\r", "\n", "|", "^", "~", "\\", "&")
+
+
+def sanitize_field(value: str) -> str:
+    """Neutralise a single field VALUE so it cannot inject HL7 structure.
+
+    Any CR/LF or field/component/repetition/escape delimiter in ``value`` is
+    replaced with a space. Use this on every value inserted into a field so a
+    stray separator in the data cannot add or split segments.
+    """
+    s = "" if value is None else str(value)
+    for ch in _FIELD_DELIMS:
+        s = s.replace(ch, " ")
+    return s
+
+
 def split_segments(message: str) -> list[str]:
     """Segments of a message, tolerant of \\r, \\n or \\r\\n separators."""
     text = message.replace("\r\n", "\r").replace("\n", "\r")
@@ -98,9 +118,10 @@ def with_updated_msh(message: str, *, timestamp: bool = True,
             while len(f) < 11:
                 f.append("")
             if timestamp:
-                f[6] = datetime.now().strftime("%Y%m%d%H%M%S")   # MSH-7
+                f[6] = sanitize_field(
+                    datetime.now().strftime("%Y%m%d%H%M%S"))     # MSH-7
             if control:
-                f[9] = new_control_id()                          # MSH-10
+                f[9] = sanitize_field(new_control_id())          # MSH-10
             seg = sep.join(f)
         out.append(seg)
     return "\r".join(out) + "\r"

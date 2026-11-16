@@ -15,6 +15,19 @@ ORM = ("MSH|^~\\&|SENDAPP|SENDFAC|RECVAPP|RECVFAC|20260101120000|1|ORM^O01|"
        "ORC|NW|ORD1\r"
        "OBR|1|ORD1|ORD1|PROC^Example Procedure\r")
 
+def test_sanitize_field_blocks_segment_injection():
+    # T37: a CR (HL7 segment separator) inside a field value must be neutralised
+    # so it cannot inject a new segment; encoding chars are stripped too.
+    evil = "DOE^TEST\rPID|9||INJECTED"
+    clean = m.sanitize_field(evil)
+    assert "\r" not in clean and "\n" not in clean
+    for ch in ("|", "^", "~", "\\", "&"):
+        assert ch not in clean
+    # a single clean value passes through unchanged
+    assert m.sanitize_field("ACC12345") == "ACC12345"
+    assert m.sanitize_field(None) == ""
+
+
 ADT = ("MSH|^~\\&|A|B|C|D|20260101120000|2|ADT^A01|MSGID2|T|2.5\r"
        "PID|1||TESTID^^^^MR||DOE^TEST\r")
 

@@ -283,6 +283,7 @@ def modify_files(files: Iterable[Path], ops: list[ModifyOp],
                     if tag in ds:
                         del ds[tag]
                 else:  # set / update
+                    _validate_modify_value(tag, op.value)
                     if tag in ds:
                         ds[tag].value = op.value
                     else:
@@ -319,6 +320,22 @@ def _guess_vr(tag: Tag) -> str:
         return dictionary_VR(tag)
     except KeyError:
         return "LO"
+
+
+def _validate_modify_value(tag: Tag, value: str) -> None:
+    """Raise ValueError if ``value`` is not valid for ``tag``'s dictionary VR.
+
+    Stops Modify from writing a malformed UID / date / number that would make
+    the object non-conformant (the batch records it as a failed item with the
+    reason). Private, unknown or dual-VR tags are not checked.
+    """
+    from . import dicomtags
+    vr = dicomtags.vr_for_tag(tag)
+    if not vr or " or " in vr:
+        return
+    ok, why = dicomtags.validate(vr, value)
+    if not ok:
+        raise ValueError(f"value invalid for VR {vr}: {why}")
 
 
 # ---------------------------------------------------------------------------

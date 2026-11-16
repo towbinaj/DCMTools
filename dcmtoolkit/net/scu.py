@@ -517,6 +517,13 @@ class CommitResult:
     message: str = ""
 
 
+def _commit_report_matches(event_information, txn_uid: str) -> bool:
+    """True if a Storage-Commitment N-EVENT-REPORT correlates with our request:
+    its Transaction UID matches the one we sent. Guards against an unrelated or
+    forged report being accepted as the commitment result."""
+    return str(getattr(event_information, "TransactionUID", "")) == str(txn_uid)
+
+
 def storage_commit(my_aetitle: str, node: Node, sop_refs: list[tuple[str, str]],
                    listen_port: int = 11115, timeout: int = 60,
                    progress: Progress = _noop) -> CommitResult:
@@ -537,6 +544,10 @@ def storage_commit(my_aetitle: str, node: Node, sop_refs: list[tuple[str, str]],
 
     def handle_report(event):
         ds = event.event_information
+        if not _commit_report_matches(ds, txn_uid):
+            # Not our transaction (unrelated or forged report): do not accept it
+            # as the result; keep waiting for the correlated report.
+            return 0x0000
         for item in getattr(ds, "ReferencedSOPSequence", []) or []:
             result.committed.append(str(item.ReferencedSOPInstanceUID))
         for item in getattr(ds, "FailedSOPSequence", []) or []:
