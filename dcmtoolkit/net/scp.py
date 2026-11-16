@@ -25,6 +25,15 @@ from ..tools.fileops import save_dicom
 log = get_logger("scp")
 
 
+def _exposed_without_auth(bind_host: str, allowlist, require_client_cert: bool) -> bool:
+    """True when the receiver is reachable off-host with no peer authentication:
+    bound to a non-loopback interface with neither a calling-AE allowlist nor a
+    required client certificate. Used to warn the operator at startup (ported
+    from the De-ID app's safe-receiver behaviour)."""
+    loopback = (bind_host or "").strip() in ("127.0.0.1", "::1", "localhost")
+    return (not loopback) and (not allowlist) and (not require_client_cert)
+
+
 @dataclass
 class ReceiverStats:
     listening: bool = False
@@ -88,6 +97,13 @@ class StoreSCP:
                 require_client_cert=self.cfg.require_client_cert)
 
         bind_host = self.cfg.bind_host or "0.0.0.0"
+        if _exposed_without_auth(bind_host, allow, self.cfg.require_client_cert):
+            log.warning(
+                "Store SCP binding %s with no calling-AE allowlist and no "
+                "client-certificate requirement: any peer that can reach port "
+                "%d may associate and send objects. Restrict bind_host to "
+                "127.0.0.1, set an allowed-AE list, or require client certs.",
+                bind_host, self.cfg.port)
         self._server = ae.start_server(
             (bind_host, self.cfg.port), block=False, evt_handlers=handlers,
             ssl_context=ssl_context)

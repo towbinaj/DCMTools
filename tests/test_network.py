@@ -12,6 +12,21 @@ from dcmtoolkit.net import scu, mwl, mpps
 from conftest import make_ct, save, storage_scp
 
 
+def test_receiver_exposure_warning_logic():
+    # Ported from De-ID: warn only when the receiver is reachable off-host with
+    # no peer authentication (non-loopback bind, no allowlist, no client cert).
+    from dcmtoolkit.net.scp import _exposed_without_auth
+    # exposed + unauthenticated -> warn
+    assert _exposed_without_auth("0.0.0.0", [], False) is True
+    assert _exposed_without_auth("192.0.2.10", [], False) is True
+    # loopback is never a concern
+    assert _exposed_without_auth("127.0.0.1", [], False) is False
+    assert _exposed_without_auth("::1", [], False) is False
+    # an allowlist or a required client cert authenticates the peer -> no warn
+    assert _exposed_without_auth("0.0.0.0", ["TESTPACS"], False) is False
+    assert _exposed_without_auth("0.0.0.0", [], True) is False
+
+
 def test_storage_commit_report_correlation():
     # T40: a Storage-Commitment result report is accepted only when its
     # Transaction UID matches the one we sent (guards against a forged/unrelated
