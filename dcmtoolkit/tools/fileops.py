@@ -36,7 +36,7 @@ def _noop(_: str) -> None:
 _ZERO_PREAMBLE = b"\x00" * 128
 
 
-def save_dicom(ds: Dataset, dest, **kwargs) -> None:
+def save_dicom(ds: Dataset, dest, *, sanitize=None, **kwargs) -> None:
     """Write ``ds`` with the 128-byte file preamble zeroed.
 
     That unused preamble region is the vehicle for the DICOM-as-PE polyglot
@@ -45,7 +45,21 @@ def save_dicom(ds: Dataset, dest, **kwargs) -> None:
     read / modify / write, so a tool that re-saves a dropped object would carry
     an embedded executable header straight through. Zeroing it here means no
     file this toolkit writes can double as a launchable binary.
+
+    ``sanitize`` optionally runs the structural-sanitize pass before writing
+    (strip icon/overlay/curve/encapsulated carriers). Pass a
+    ``tools.sanitize.SanitizeConfig`` with ``enabled=True`` to opt in; the
+    de-identify tool and Store Receiver already run it inside the processing
+    engine, so this is the hook for the content-preserving file tools. Preamble
+    zeroing above is unconditional and independent of this.
     """
+    if sanitize is not None and getattr(sanitize, "enabled", False):
+        from .sanitize import sanitize_dataset
+        rep = sanitize_dataset(ds, sanitize)
+        if rep.any_found:
+            log.warning("Structural sanitize on %s: %s",
+                        getattr(ds, "SOPInstanceUID", "?"),
+                        "; ".join(rep.findings()))
     ds.preamble = _ZERO_PREAMBLE
     ds.save_as(str(dest), **kwargs)
 

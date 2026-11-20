@@ -142,6 +142,23 @@ def test_conformance_issues_structured():
     assert isinstance(missing, list)
 
 
+def test_flags_structural_carriers_as_security(tmp_path):
+    # An object with an overlay plane + encapsulated-document stream must be
+    # reported (QA detects, never strips).
+    clean = make_ct()
+    save(clean, tmp_path / "clean.dcm")
+    carrier = make_ct()
+    carrier.add_new(0x60003000, "OW", b"\x00\x00")   # Overlay Data
+    carrier.add_new(0x00420011, "OB", b"\x00\x01")   # Encapsulated Document
+    save(carrier, tmp_path / "carrier.dcm")
+
+    res = qa.qa_scan([tmp_path / "clean.dcm", tmp_path / "carrier.dcm"])
+    sec = [f for f in res.findings
+           if f.category == "security" and "carrier" in f.summary]
+    assert len(sec) == 1
+    assert "carrier.dcm" in sec[0].summary
+
+
 def test_flags_non_zero_preamble_as_security(tmp_path):
     # A conformant file (zeroed preamble) raises no security finding...
     save(make_ct(), tmp_path / "ok.dcm")

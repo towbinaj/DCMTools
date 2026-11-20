@@ -178,6 +178,12 @@ class ReceiverPanel(ToolPanel):
         if cfg.allow_burned_in:
             self.allow_burned_in.select()
         row("", self.allow_burned_in)
+        self.sanitize_enabled = ctk.CTkCheckBox(
+            form, text="Structural sanitize (strip icon/overlay/curve/"
+            "encapsulated carriers - for untrusted sources)")
+        if cfg.sanitize_enabled:
+            self.sanitize_enabled.select()
+        row("", self.sanitize_enabled)
 
         # [MORPH]
         ctk.CTkLabel(form, text="Morph",
@@ -266,6 +272,7 @@ class ReceiverPanel(ToolPanel):
             remove_image_left=to_int(self.img_left.get(), 0),
             remove_image_left_modality=_split(self.img_left_mod.get()),
             allow_burned_in=bool(self.allow_burned_in.get()),
+            sanitize_enabled=bool(self.sanitize_enabled.get()),
             morph_tags=bool(self.morph_tags.get()),
             morphing_file_format=self.morph_fmt.get().strip(),
             morphing_file=self.morph_file.get().strip(),

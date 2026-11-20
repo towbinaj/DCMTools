@@ -73,6 +73,12 @@ class ReceiverConfig:
     # a de-identification that leaves the burned-in text intact. Set True to
     # override when the burned-in content is known to be non-PHI.
     allow_burned_in: bool = False
+    # Structural sanitize (attack-surface reduction, NOT de-identification): strip
+    # smuggled-payload carriers - icon image sequence, overlay/curve planes,
+    # encapsulated documents. Off by default (these can be legitimate clinical
+    # content); turn on for untrusted sources / release. The preamble is always
+    # neutralized on write regardless of this toggle.
+    sanitize_enabled: bool = False
     # [MORPH] crosswalk: first format tag is the lookup key, the rest are
     # overwritten from the matching crosswalk row (CSV or pipe-delimited).
     morph_tags: bool = False
@@ -204,6 +210,16 @@ class Processor:
         # BurnedInAnnotation attribute, yet the guard still needs to know it.
         burned_in = (str(getattr(ds, "BurnedInAnnotation", "") or "")
                      .strip().upper() == "YES")
+        # Structural sanitize runs first (fewer elements for the profile to chew
+        # on, and it is independent of PHI). Covers both the de-identify tool and
+        # the Store Receiver, which share this engine.
+        if self.cfg.sanitize_enabled:
+            from ..tools.sanitize import sanitize_dataset, SanitizeConfig
+            rep = sanitize_dataset(ds, SanitizeConfig(enabled=True))
+            if rep.any_found:
+                log.warning("Structural sanitize on %s: %s",
+                            getattr(ds, "SOPInstanceUID", "?"),
+                            "; ".join(rep.findings()))
         if self.cfg.basic_profile:
             self._apply_basic_profile(ds)
         if self.cfg.morph_tags:

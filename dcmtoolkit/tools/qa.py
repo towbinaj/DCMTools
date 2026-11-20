@@ -20,6 +20,7 @@ from pydicom import dcmread
 from . import dicomtags
 from . import conformance as _conformance
 from . import render as _render
+from . import sanitize as _sanitize
 from .fileops import _run_pool
 
 # keyword -> VR (for the abnormal-value validation)
@@ -105,6 +106,13 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
             if pre and any(pre):
                 rec["__preamble"] = ("an MZ/PE executable header"
                                      if pre[:2] == b"MZ" else "non-zero data")
+            # Structural payload carriers (icon / overlay / curve / encapsulated
+            # document) - detect and report only (QA never mutates). The preamble
+            # is reported separately above, so drop that line from the list.
+            carriers = _sanitize.scan_dataset(ds)
+            cfind = [c for c in carriers.findings() if "preamble" not in c]
+            if cfind:
+                rec["__carriers"] = cfind
             # DICOMDIR and other Media Storage Directory files are not image
             # instances - exclude them from the instance-level checks.
             fm = getattr(ds, "file_meta", None)
@@ -173,6 +181,18 @@ def qa_scan(files, on_item=None, should_cancel=None, workers: int = 1,
                 "polyglot (CVE-2019-11687). Re-save it through any of this "
                 "toolkit's file tools (Modify, De-identify, ...) to zero the "
                 "preamble and neutralize it."))
+
+    # structural payload carriers (icon / overlay / curve / encapsulated doc)
+    for r in good:
+        cs = r.get("__carriers")
+        if cs:
+            name = Path(r["__file"]).name
+            findings.append(Finding(
+                "security", f"{name}: {len(cs)} structural carrier(s)",
+                "Non-clinical payload carriers present: " + "; ".join(cs) + ". "
+                "These can hide burned-in PHI or widen the image-decoder attack "
+                "surface. Re-save through De-identify with 'Structural sanitize' "
+                "enabled to strip them."))
 
     # IOD conformance (dicom-validator) - only when requested
     for r in good:
