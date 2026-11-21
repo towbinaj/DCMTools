@@ -134,6 +134,7 @@ class StudyContext:
     study_id: str = ""
     study_description: str = ""
     referring_physician: str = ""
+    requesting_physician: str = ""   # (0032,1032) - used by the worklist-morph tool
     modalities: str = ""       # ModalitiesInStudy (informational)
 
     @property
