@@ -24,6 +24,7 @@ from .panels_preview import PreviewPanel
 from .panels_compare import ComparePanel
 from .panels_edit import PatientEditPanel, StudyEditPanel, SeriesEditPanel
 from .panels_modality import ModalitySCUPanel
+from .panels_worklistmorph import WorklistMorphPanel
 from .panels_hl7 import HL7SenderPanel
 from .panels_print2pacs import Print2PACSPanel
 from .panels_qa import QAPanel
@@ -47,7 +48,7 @@ NAV_GROUPS = [
                DeidentifyPanel, QAPanel]),
     ("Edit demographics", [PatientEditPanel, StudyEditPanel, SeriesEditPanel]),
     ("Import", [Print2PACSPanel]),
-    ("Modality", [ModalitySCUPanel]),
+    ("Modality", [ModalitySCUPanel, WorklistMorphPanel]),
     ("HL7", [HL7SenderPanel]),
 ]
 
